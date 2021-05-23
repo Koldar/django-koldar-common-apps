@@ -1,0 +1,7 @@
+*PASSWORD
+.idea/
+
+build/
+dist/
+venv/
+pmakeup-cache.json
