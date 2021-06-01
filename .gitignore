@@ -1,8 +1,17 @@
-*PASSWORD
+# Intellij
 .idea/
 
+# Pmakeup
+*PASSWORD*
 build/
 dist/
-venv/
 pmakeup-cache.json
 django_koldar_utils.egg-info
+
+# Python 
+venv/
+*.pyc
+
+# App
+graphql-schema.json
+dependency-graph.svg
