@@ -1,4 +1,5 @@
 import re
+from collections import OrderedDict
 from typing import Iterable, Any, List
 
 import networkx as nx
@@ -48,7 +49,6 @@ def setup():
         s.setup()
 
 
-
 def get_ordered_sections() -> Iterable["AbstractDjangoSection"]:
     """
     Generates a list of sections, where the one with no setup dependency are outputted first
@@ -61,6 +61,8 @@ def patch_middlewares(middleswares: List[str]) -> List[str]:
     result = list(middleswares)
     for s in get_ordered_sections():
         result = s.update_middlewares(result)
+        # remove duplicates from list. see https://stackoverflow.com/a/7961390/1887602
+        result = list(OrderedDict.fromkeys(result))
     return result
 
 
