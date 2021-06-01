@@ -25,7 +25,7 @@ TWINE_PYPI_USER = "Koldar"
 ADMIN_PASSWORD = files.read_file_content("PASSWORD")
 
 
-core.set_variable("version_file", paths.abs_path(list(files.find_file(".", "version.py"))[0]))
+core.set_variable("version_file", paths.abs_path(list(files.find_file("django_koldar_utils", "version.py"))[0]))
 
 
 def clean():
