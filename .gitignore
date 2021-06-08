@@ -6,7 +6,7 @@
 build/
 dist/
 pmakeup-cache.json
-django_koldar_utils.egg-info
+*.egg-info/
 
 # Python 
 venv/
