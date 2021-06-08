@@ -2,6 +2,7 @@ import abc
 from typing import TypeVar, Generic, Optional
 
 from django.contrib.auth.base_user import BaseUserManager
+from django.contrib.auth.models import UserManager
 from django.db import models
 from django.db.models import Model
 from polymorphic.managers import PolymorphicManager
@@ -11,19 +12,12 @@ TMODEL = TypeVar("TMODEL")
 
 class IManager(abc.ABC):
 
-    @abc.abstractmethod
-    def create(self, *args, **kwargs) -> TMODEL:
-        """
-        Create a new model
-        """
-        pass
-
     @property
     def model_class(self) -> type:
         """
         class of the model the class is currently managing
         """
-        return self.model.__class__
+        return self.model
 
     @property
     def MultipleObjectsReturned(self):
@@ -85,7 +79,12 @@ class IManager(abc.ABC):
 
 
         """
-        return self._get(**kwargs)
+        try:
+            return self._get(**kwargs)
+        except self.DoesNotExist:
+            raise self.DoesNotExist(f"{self.model_class.__name__} with values {kwargs} does not exist")
+        except self.MultipleObjectsReturned:
+            raise self.MultipleObjectsReturned(f"there are multiple {self.model_class.__name__} with values {kwargs}!")
 
     def find_only_or_None(self, **kwargs) -> Optional[TMODEL]:
         """
@@ -101,11 +100,8 @@ class IManager(abc.ABC):
 
 class ExtendedPolymorphicManager(Generic[TMODEL], IManager, PolymorphicManager):
 
-    def create(self, *args, **kwargs) -> TMODEL:
-        return super(ExtendedPolymorphicManager, self).create(*args, **kwargs)
-
     def _get(self, *args, **kwargs):
-        return self.model_class._meta._default_manager
+        return self.model_class._default_manager.get(*args, **kwargs)
 
 
 class ExtendedManager(Generic[TMODEL], IManager, models.Manager):
@@ -114,22 +110,13 @@ class ExtendedManager(Generic[TMODEL], IManager, models.Manager):
     """
 
     def _get(self, *args, **kwargs):
-        return self.model_class._meta._default_manager
-
-    def create(self, *args, **kwargs) -> TMODEL:
-        """
-        Create a new model
-        """
-        return super(ExtendedManager, self).create(*args, **kwargs)
+        return self.model_class._default_manager.get(*args, **kwargs)
 
 
-class ExtendedUserManager(Generic[TMODEL], IManager, BaseUserManager):
+class ExtendedUserManager(Generic[TMODEL], IManager, UserManager):
     """
     Extension of the UserManager implementation
     """
 
-    def create(self, *args, **kwargs) -> TMODEL:
-        return self.model_class._meta._default_manager
-
     def _get(self, *args, **kwargs):
-        return super(ExtendedUserManager, self).create(*args, **kwargs)
+        return self.model_class._default_manager.get(*args, **kwargs)

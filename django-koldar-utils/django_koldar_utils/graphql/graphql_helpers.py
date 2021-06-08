@@ -1,3 +1,6 @@
+from typing import Iterable, Tuple
+
+import django_filters
 from graphene_django import DjangoObjectType
 from graphene_django_extras import LimitOffsetGraphqlPagination, DjangoInputObjectType, DjangoListObjectType
 from rest_framework import serializers
@@ -62,6 +65,7 @@ def create_graphql_input(cls) -> type:
 def create_graphql_list_type(cls) -> type:
     """
     A graphql type representing a list of a given class.
+    This is used to generate list of DjancoObjectType
     See https://github.com/eamigo86/graphene-django-extras
     """
     graphql_type_meta = type(
@@ -83,6 +87,37 @@ def create_graphql_list_type(cls) -> type:
         }
     )
     return graphql_type
+
+
+#todo remove
+# def create_graphql_input_list_type(model_type: type, input_type: type) -> type:
+#     """
+#     A graphql type representing a list of a given class.
+#     This is used to generate list of DjangoInputObject. useful in mutations
+#     See https://github.com/eamigo86/graphene-django-extras
+#
+#     :param model_type: django type
+#     :param input_type: input type assopciatedto the django model
+#     :return: class representing a list fo input types
+#     """
+#     graphql_type_meta = type(
+#         "Meta",
+#         (object, ),
+#         {
+#             "model": input_type,
+#             "description": f"""GraphQL type representing a list of input of type {model_type.__name__}.""",
+#             "pagination": LimitOffsetGraphqlPagination(default_limit=25)
+#         }
+#     )
+#
+#     graphql_type = type(
+#         f"{model_type.__name__}GraphQLInputListType",
+#         (DjangoListObjectType, ),
+#         {
+#             "Meta": graphql_type_meta
+#         }
+#     )
+#     return graphql_type
 
 
 def create_serializer(cls) -> type:

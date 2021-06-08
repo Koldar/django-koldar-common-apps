@@ -2,9 +2,9 @@ import os
 from typing import Iterable
 
 import setuptools
-from django_koldar_utils import version
+from django_app_graphql import version
 
-PACKAGE_NAME = "django-koldar-utils"
+PACKAGE_NAME = "django_app_graphql"
 PACKAGE_VERSION = version.VERSION
 PACKAGE_DESCRIPTION = "Some stuff that i used when developing with django"
 PACKAGE_URL = "https://github.com/Koldar/django-koldar-common-apps"

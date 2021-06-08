@@ -1,10 +1,14 @@
 import re
-from typing import List, Tuple, Any, Callable, Union
+from datetime import timedelta
+from typing import List, Tuple, Any, Callable, Union, Optional
 
 import traceback
 import os
 import inflection as inflection
+from arrow import Arrow
 from django.db import models
+
+from django_koldar_utils.django.fields.ArrowField import ArrowField
 
 
 class Orm:
@@ -99,7 +103,7 @@ class Orm:
             )
 
     @staticmethod
-    def generic_field(field_type: type, null: bool, blank: bool, choices: List[Tuple[Any, Any]], db_column: str, db_index: bool, default: Union[Any, Callable[[], Any]], error_messages: List[str], help_text: str, primary_key: bool, unique: bool, unique_for_date: str, unique_for_month: str, unique_for_year: str, verbose_name: str, validators: List[Callable[[Any], None]], max_length: int):
+    def generic_field(field_type: type, null: bool, blank: bool, choices: List[Tuple[Any, Any]], db_column: Optional[str], db_index: bool, default: Union[Any, Callable[[], Any]], error_messages: Optional[List[str]], help_text: str, primary_key: bool, unique: bool, unique_for_date: Optional[str], unique_for_month: Optional[str], unique_for_year: Optional[str], verbose_name: Optional[str], validators: List[Callable[[Any], None]], max_length: int):
         """
         :param field_type: type of the field to create
         :param null: If True, Django will store empty values as NULL in the database
@@ -208,7 +212,7 @@ class Orm:
         :param relationship_model: model of the through relationship
         :see https://gist.github.com/jacobian/827937#file-models-py:
         """
-        return None
+        pass
 
     @classmethod
     def relationship_many_to_many_inverse(cls, from_model: Union[str, type], to_model: Union[str, type],
@@ -222,7 +226,7 @@ class Orm:
         :param help_text: help text
         :return:
         """
-        return None
+        pass
 
     @classmethod
     def relationship_many_to_many_in_through(cls, to_model: Union[str, type], on_delete, related_name: str) -> models.ForeignKey:
@@ -269,7 +273,7 @@ class Orm:
         :param help_text: help text
         :return:
         """
-        return None
+        pass
 
     @classmethod
     def relationship_one_to_many(cls, single_model: Union[str, type], multi_model: Union[str, type],
@@ -286,7 +290,7 @@ class Orm:
         :param relationship_name: name of the relation
         :return:
         """
-        return None
+        pass
 
     @classmethod
     def relationship_one_to_many_inverse(cls, single_model: Union[str, type], multi_model: Union[str, type], on_delete,
@@ -328,7 +332,7 @@ class Orm:
         :param relationship_name: name of the relation
         :return:
         """
-        return None
+        pass
 
     @classmethod
     def relationship_zero_to_many_inverse(cls, single_model: Union[str, type], multi_model: Union[str, type], on_delete,
@@ -369,6 +373,7 @@ class Orm:
             on_delete=on_delete,
             help_text=help_text,
             null=False,
+            blank=False,
             related_name=related_name,
             related_query_name=related_query_name,
             db_column=f"id_{relationship_name}_{to_model}"
@@ -376,16 +381,14 @@ class Orm:
 
     @classmethod
     def relationship_one_to_one_inverse(cls, from_model: Union[str, type], to_model: Union[str, type],
-                                        relationship_name: str, on_delete, help_text: str = None) -> models.Manager:
+                                        relationship_name: str) -> models.Manager:
         """
         one author has one name. This should be put in the "name"
         :param from_model: author
         :param to_model: name
-        :param on_delete: what to do whenever a delete is performed
-        :param help_text: help text
         :return:
         """
-        return None
+        pass
 
     @classmethod
     def relationship_one_to_zeroone(cls, from_model: Union[str, type], to_model: Union[str, type], relationship_name: str, on_delete,
@@ -403,6 +406,7 @@ class Orm:
             on_delete=on_delete,
             help_text=help_text,
             null=True,
+            blank=True,
             related_name=related_name,
             related_query_name=related_query_name,
             db_column=f"id_{relationship_name}_{to_model}"
@@ -418,21 +422,26 @@ class Orm:
         :param help_text: help text
         :return:
         """
-        return None
+        pass
 
-    def required_indexed_string(self, help_text: str) -> models.TextField:
+    def required_indexed_string(self, description: str, default_value: Union[str, Callable[[], str]] = None, max_length: int = None) -> models.CharField:
         """
         Tells Django that the model has a string field. If default value is set, it is the value added to the database
         if the user does not provide a value. The field itself is non nullable. We will create an index for quick recovery
 
-        :param help_text: text used to explain what the field does
+        :param description: text used to explain what the field does
+        :param default_value: value to set the field to if the developer does not add a value by herself
+        :param max_length: maximum number of hcaracters in the string. If left unspecified, it is 255
+        :return: string type
         """
+        if max_length is None:
+            max_length = 255
         return Orm.generic_field(
-            field_type=models.TextField,
+            field_type=models.CharField,
             null=False,
             blank=False,
-            default=None,
-            help_text=help_text,
+            default=default_value,
+            help_text=description,
             choices=None,
             db_column=None,
             db_index=True,
@@ -444,38 +453,190 @@ class Orm:
             unique_for_month=None,
             verbose_name=None,
             validators=[],
-            max_length=None
+            max_length=max_length
         )
 
     @classmethod
-    def required_string(cls, help_text: str, default_value: Union[str, Callable[[], str]] = None) -> models.TextField:
+    def required_string(cls, description: str, default_value: Union[str, Callable[[], str]] = None, max_length: int = None) -> models.CharField:
         """
         Tells Django that the model has a string field. If default value is set, it is the value added to the database
         if the user does not provide a value. The field itself is non nullable
 
-        :param help_text: text used to explain what the field does
+        :param description: text used to explain what the field does
         :param default_value: value to set the field to if the developer does not add a value by herself
+        :param max_length: maximum number of hcaracters in the string. If left unspecified, it is 255
+        :return: string type
         """
-        return Orm.generic_field_simple(
-            field_type=models.TextField,
+        if max_length is None:
+            max_length = 255
+        return Orm.generic_field(
+            field_type=models.CharField,
             null=False,
             blank=False,
+            choices=None,
+            db_column=None,
+            db_index=False,
             default=default_value,
-            help_text=help_text
+            error_messages=None,
+            help_text=description,
+            primary_key=False,
+            unique=False,
+            unique_for_date=None,
+            unique_for_year=None,
+            unique_for_month=None,
+            verbose_name=None,
+            validators=[],
+            max_length=max_length
         )
 
     @classmethod
-    def required_blank_string(cls, help_text: str, default_value: Union[str, Callable[[], str]] = None) -> models.TextField:
+    def required_email(cls, description: str, max_length: int = None, default_value: Union[str, Callable[[], str]] = None) -> models.EmailField:
+        """
+        Tells Django that the model has a string field. If default value is set, it is the value added to the database
+        if the user does not provide a value. The field itself is non nullable
+
+       :param description: text used to explain what the field does
+        :param default_value: value to set the field to if the developer does not add a value by herself
+        :param max_length: maximum number of hcaracters in the string. If left unspecified, it is 255
+        :return: string type
+        """
+        if max_length is None:
+            max_length = 255
+        return Orm.generic_field(
+            field_type=models.EmailField,
+            null=False,
+            blank=False,
+            max_length=max_length,
+            default=default_value,
+            help_text=description,
+            choices=None,
+            db_column=None,
+            db_index=False,
+            error_messages=None,
+            primary_key=False,
+            unique=False,
+            unique_for_date=None,
+            unique_for_year=None,
+            unique_for_month=None,
+            verbose_name=None,
+            validators=[],
+        )
+
+    @classmethod
+    def required_unique_string(cls, description: str, default_value: Union[str, Callable[[], str]] = None, max_length: int = None) -> models.CharField:
+        """
+        Tells Django that the model has a string field. If default value is set, it is the value added to the database
+        if the user does not provide a value. The field itself is non nullable
+
+        :param description: text used to explain what the field does
+        :param default_value: value to set the field to if the developer does not add a value by herself
+        :param max_length: maximum number of hcaracters in the string. If left unspecified, it is 255
+        :return: string type
+        """
+        if max_length is None:
+            max_length = 255
+        return Orm.generic_field(
+            field_type=models.CharField,
+            null=False,
+            blank=False,
+            default=default_value,
+            help_text=description,
+            unique=True,
+
+            choices=None,
+            db_column=None,
+            db_index=False,
+            error_messages=None,
+            primary_key=False,
+            unique_for_date=None,
+            unique_for_year=None,
+            unique_for_month=None,
+            verbose_name=None,
+            validators=[],
+            max_length=max_length
+        )
+
+    @classmethod
+    def nullable_string(cls, description: str, default_value: Union[str, Callable[[], str]] = None, max_length: int = None) -> models.CharField:
+        """
+        Tells Django that the model has a string field. If default value is set, it is the value added to the database
+        if the user does not provide a value. The field itself may be null
+
+        :param description: text used to explain what the field does
+        :param default_value: value to set the field to if the developer does not add a value by herself
+        :param max_length: maximum number of characters in the string. If left unspecified, it is 255
+        :return: string type
+        """
+        if max_length is None:
+            max_length = 255
+        return Orm.generic_field(
+            field_type=models.CharField,
+            null=True,
+            blank=False,
+            default=default_value,
+            help_text=description,
+
+            unique=False,
+            choices=None,
+            db_column=None,
+            db_index=False,
+            error_messages=None,
+            primary_key=False,
+            unique_for_date=None,
+            unique_for_year=None,
+            unique_for_month=None,
+            verbose_name=None,
+            validators=[],
+            max_length=max_length
+        )
+
+    @classmethod
+    def required_blank_string(cls, help_text: str, default_value: Union[str, Callable[[], str]] = None, max_length: int = None) -> models.CharField:
+        if max_length is None:
+            max_length = 255
         return Orm.generic_field_simple(
-            field_type=models.TextField,
+            field_type=models.CharField,
             null=False,
             blank=True,
             default=default_value,
             help_text=help_text
         )
 
+    @classmethod
+    def required_blank_text(cls, description: str,
+                            default_value: Union[str, Callable[[], str]] = None) -> models.TextField:
+        """
+        Tells Django that the model has a text field: this means that it is a simple string that si assume to be very long.
+        The field may be blank, but never null
+
+        If default value is set, it is the value added to the database
+        if the user does not provide a value. The field itself is non nullable
+
+        :param description: text used to explain what the field does
+        :param default_value: value to set the field to if the developer does not add a value by herself
+        """
+        return Orm.generic_field(
+            field_type=models.TextField,
+            null=False,
+            blank=True,
+            choices=None,
+            db_column=None,
+            db_index=False,
+            default=default_value,
+            error_messages=None,
+            help_text=description,
+            primary_key=False,
+            unique=False,
+            unique_for_date=None,
+            unique_for_year=None,
+            unique_for_month=None,
+            verbose_name=None,
+            validators=[],
+            max_length=None
+        )
+
     @staticmethod
-    def required_duration(help_text: str, default_value: Union[str, Callable[[], str]] = None) -> models.DurationField:
+    def required_duration(help_text: str, default_value: Union[timedelta, Callable[[], timedelta]] = None) -> models.DurationField:
         return Orm.generic_field_simple(
             field_type=models.DurationField,
             null=False,
@@ -486,9 +647,12 @@ class Orm:
 
     @staticmethod
     def required_datetime(help_text: str,
-                          default_value: Union[str, Callable[[], str]] = None) -> models.DateTimeField:
+                          default_value: Union[Arrow, Callable[[], Arrow]] = None) -> ArrowField:
+        """
+        tell django that this model has a date time that needs to be set
+        """
         return Orm.generic_field_simple(
-            field_type=models.DateTimeField,
+            field_type=ArrowField,
             null=False,
             blank=False,
             default=default_value,
@@ -496,13 +660,24 @@ class Orm:
         )
 
     @staticmethod
-    def required_boolean(help_text: str, default_value: Union[str, Callable[[], str]] = None) -> models.BooleanField:
+    def nullable_datetime(help_text: str,
+                          default_value: Union[Arrow, Callable[[], Arrow]] = None) -> ArrowField:
+        return Orm.generic_field_simple(
+            field_type=ArrowField,
+            null=True,
+            blank=False,
+            default=default_value,
+            help_text=help_text
+        )
+
+    @classmethod
+    def required_boolean(cls, description: str, default_value: Union[bool, Callable[[], bool]] = None) -> models.BooleanField:
         return Orm.generic_field_simple(
             field_type=models.BooleanField,
             null=False,
             blank=False,
             default=default_value,
-            help_text=help_text
+            help_text=description
         )
 
     @staticmethod
