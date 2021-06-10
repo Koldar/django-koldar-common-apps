@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict, Any, Callable, Union
 import graphene
 import inflect as inflect
 import stringcase
+from graphene_django import DjangoObjectType
 from graphql_jwt.decorators import login_required
 
 from django_koldar_utils.django import filters_helpers, django_helpers, permissions_helpers
@@ -14,7 +15,7 @@ MUTATION_FIELD_DESCRIPTION = "Mutation return value. Do not explicitly use it."
 A prefix to put to every mutation return value"""
 
 
-class Helper(object):
+class GraphQLHelper(object):
     """
     Class used to generate relevant fields for graphql
     """
@@ -133,7 +134,7 @@ class Helper(object):
 
     @classmethod
     def create_authenticated_query(cls, query_class_name: str, description: str, arguments: Dict[str, type],
-                        return_type: type, body: Callable, permissions_required: List[str]) -> type:
+                        return_type: type, body: Callable, permissions_required: List[str], add_token: bool = False) -> type:
         """
         Create a graphQL query. Decorators on body will be considered
 
@@ -141,18 +142,20 @@ class Helper(object):
         :param description: description of the query
         :param arguments: list of arguments in input of the query. It is a dictioanry where the values are graphene
             types (e.g., graphene.String). If inputting a complex type, use graphene.Argument.
-        :param return_type: return type (ObjectType) of the query
+        :param return_type: return type (ObjectType) of the query.
         :param body: a callable specifiying the code of the query. The first is the query class isntance.
             Info provides graphql context. the rest are the query arguments.
             You need to return the query value
         :param permissions_required: list fo permissions required to be satisfied in order for fully using the function
+        :param add_token: if set, we will add an optional token as parameter for the query
         """
 
 
         description = description + f"""The query requires authentication. Specifically, it requires the following permissions:
         {', '.join(permissions_required)}.
         """
-        arguments["token"] = Helper.argument_jwt_token()
+        if add_token:
+            arguments["token"] = cls.argument_jwt_token()
         return cls.create_query(
             query_class_name=query_class_name,
             description=description,
@@ -285,7 +288,7 @@ class Helper(object):
 
         if permissions_required is not None:
             # add token and authentication decorators
-            arguments["token"] = Helper.argument_jwt_token()
+            arguments["token"] = cls.argument_jwt_token()
             body = login_required(body)
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
@@ -371,7 +374,7 @@ class Helper(object):
         mutation_class_meta = type(
             "Arguments",
             (object,),
-            {"token": Helper.argument_jwt_token(), **arguments}
+            {"token": cls.argument_jwt_token(), **arguments}
         )
 
         description += f"""The mutation, in order to be be accessed, required user authentication. The permissions
@@ -454,9 +457,9 @@ class Helper(object):
             return mutation_class(result)
 
         arguments = dict()
-        arguments[input_name] = Helper.argument_required_input(django_input_type, description="The object to add into the database. id should not be populated. ")
+        arguments[input_name] = cls.argument_required_input(django_input_type, description="The object to add into the database. id should not be populated. ")
         if permissions_required is not None:
-            arguments["token"] = Helper.argument_jwt_token()
+            arguments["token"] = cls.argument_jwt_token()
             body = login_required(body)
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
@@ -465,7 +468,7 @@ class Helper(object):
             description=description,
             arguments=arguments,
             return_type={
-                output_name: Helper.returns_nonnull(django_graphql_type, description=f"the {django_type.__name__} just added into the database")
+                output_name: cls.returns_nonnull(django_graphql_type, description=f"the {django_type.__name__} just added into the database")
             },
             body=body
         )
@@ -534,11 +537,11 @@ class Helper(object):
             return mutation_class(result)
 
         arguments = dict()
-        arguments[primary_key_name] = Helper.argument_required_id(django_type.__name__)
-        arguments[input_name] = Helper.argument_required_input(django_input_type,
+        arguments[primary_key_name] = cls.argument_required_id(django_type.__name__)
+        arguments[input_name] = cls.argument_required_input(django_input_type,
                                                                description="The object that will update the one present in the database.")
         if permissions_required is not None:
-            arguments["token"] = Helper.argument_jwt_token()
+            arguments["token"] = cls.argument_jwt_token()
             body = login_required(body)
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
@@ -547,7 +550,7 @@ class Helper(object):
             description=description,
             arguments=arguments,
             return_type={
-                output_name: Helper.returns_nonnull(django_graphql_type,
+                output_name: cls.returns_nonnull(django_graphql_type,
                                                     description=f"same {django_type.__name__} you have fetched in input")
             },
             body=body
@@ -612,9 +615,9 @@ class Helper(object):
             return mutation_class(result)
 
         arguments = dict()
-        arguments[input_name] = Helper.argument_required_id_list(django_type.__name__)
+        arguments[input_name] = cls.argument_required_id_list(django_type.__name__)
         if permissions_required is not None:
-            arguments["token"] = Helper.argument_jwt_token()
+            arguments["token"] = cls.argument_jwt_token()
             body = login_required(body)
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
@@ -623,7 +626,7 @@ class Helper(object):
             description=description,
             arguments=arguments,
             return_type={
-                output_name: Helper.returns_id_list(django_graphql_type,
+                output_name: cls.returns_id_list(django_graphql_type,
                                                     description=f"all the ids of the {django_type.__name__} models we have removed from the database")
             },
             body=body
@@ -692,9 +695,9 @@ class Helper(object):
             return mutation_class(result)
 
         arguments = dict()
-        arguments[input_name] = Helper.argument_required_id_list(django_type.__name__)
+        arguments[input_name] = cls.argument_required_id_list(django_type.__name__)
         if permissions_required is not None:
-            arguments["token"] = Helper.argument_jwt_token()
+            arguments["token"] = cls.argument_jwt_token()
             body = login_required(body)
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
@@ -703,7 +706,7 @@ class Helper(object):
             description=description,
             arguments=arguments,
             return_type={
-                output_name: Helper.returns_id_list(django_graphql_type,
+                output_name: cls.returns_id_list(django_graphql_type,
                     description=f"all the ids of the {django_type.__name__} models we have removed from the database")
             },
             body=body
@@ -863,7 +866,7 @@ class Helper(object):
         """
         tells the system that the mutation returns a non null value
 
-        :param return_type: class extending DjangoObjectType
+        :param return_type: class extending DjangoObjectType.
         :param description: if present, the help text to show to graphiQL
         :return: return value of a mutation
         """

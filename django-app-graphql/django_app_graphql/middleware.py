@@ -2,11 +2,10 @@ import json
 from typing import Optional
 
 from django.http import HttpRequest, HttpResponse
-from django_koldar_utils.django.AbstractDjangoMiddleware import AbstractDjangoMiddleware
 
 import logging
 
-from django_koldar_utils.graphene.AbstractGrapheneMiddleware import AbstractGrapheneMiddleware
+from django_koldar_utils.graphql.AbstractGrapheneMiddleware import AbstractGrapheneMiddleware
 
 LOG = logging.getLogger(__name__)
 

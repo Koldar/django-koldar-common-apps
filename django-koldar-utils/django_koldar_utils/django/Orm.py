@@ -11,7 +11,21 @@ from django.db import models
 from django_koldar_utils.django.fields.ArrowField import ArrowField
 
 
+
 class Orm:
+
+    _table_convention = "verbose"
+
+    @classmethod
+    def set_table_naming_convention(cls, v: str):
+        """
+        Change the way each model table are generated.
+
+        :param v: naming convention.
+            - verbose: we use "=" inside table names and we generate relationships name as they were predicates
+            - standard: we use "." in table names and we generate realtionship names by concatenating the table names with "_"
+        """
+        cls._table_convention = v
 
     DO_NOT_CREATE_INVERSE_RELATION = "+"
     """
@@ -37,12 +51,16 @@ class Orm:
         else:
             raise ValueError(f"Cannot find app name!")
 
-    @staticmethod
-    def create_table_name(model_cls: str) -> str:
+    @classmethod
+    def create_table_name(cls, model_cls: str) -> str:
         app_name = Orm.get_current_app_name()
         app_name = app_name.replace("_section", "")
-        # inflection.underscore(model_cls)
-        return f"{app_name}={model_cls}"
+        if cls._table_convention == "verbose":
+            return f"{app_name}={model_cls}"
+        elif cls._table_convention == "standard":
+            return f"{app_name}.{model_cls}"
+        else:
+            raise ValueError(f"invalid table convention value {cls._table_convention}!")
 
     @classmethod
     def create_n_n_table_name(cls, name: str, basemodels: List[str]):
@@ -64,7 +82,14 @@ class Orm:
                 result.append(type(m).__name__)
             else:
                 raise TypeError(f"Invalid model type {type(m)}")
-        return f"{app_name}={name}({','.join(result)})"
+
+        if cls._table_convention == "verbose":
+            return f"{app_name}={name}({','.join(result)})"
+        elif cls._table_convention == "standard":
+            return f"{name}_{'_'.join(result)}"
+        else:
+            raise ValueError(f"invalid table convention value {cls._table_convention}!")
+
 
     @staticmethod
     def generic_field_simple(field_type: type, null: bool, blank: bool, default: Union[Any, Callable[[], Any]],
