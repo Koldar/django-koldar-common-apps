@@ -1,10 +1,13 @@
 # This represents all the graphQL queries and mutations
 import logging
+import os
 
 import graphene
 import stringcase
+import graphene_federation
 
 from django_koldar_utils.graphql.graphql_decorators import graphql_subquery, graphql_submutation
+from django_app_graphql.conf import settings
 
 LOG = logging.getLogger(__name__)
 
@@ -71,8 +74,15 @@ for cls in bases:
 
 Mutation = type('Mutation', bases, properties)
 
+if settings.DJANGO_APP_GRAPHQL["ENABLE_GRAPHQL_FEDERATION"]:
+    LOG.info(f"Building graphQL schema with federation support")
+    schema = graphene_federation.build_schema(query=Query, mutation=Mutation)
+else:
+    LOG.info(f"Building graphQL schema without federatio nsupport")
+    schema = graphene.Schema(query=Query, mutation=Mutation)
 
-schema = graphene.Schema(query=Query, mutation=Mutation)
-
-LOG.debug(f"Logging the whole graphql schema:")
-LOG.debug(schema)
+if settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"] is not None:
+    p = settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"]
+    LOG.debug(f"Saving the whole generated graphql schema in {os.path.abspath(p)}")
+    with open(p, encoding="utf8", mode="w") as f:
+        f.write(str(schema))

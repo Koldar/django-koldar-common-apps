@@ -17,11 +17,24 @@ in `INSTALLED_APPS` you need to add:
 'django_filters',
 ```
 
-After all your apps you need to use this app:
+**After all your apps you need to use this app** (this is important otherwise some models won't be detected at all!):
 
 ```
 'django_app_graphql',
 ```
+
+The first thing you need to do is determine if you want your grpahql server setupped using `graphene` or uysing `ariadne`.
+In settings, write:
+
+```
+DJANGO_APP_GRAPHQL = {
+    "BACKEND_TYPE": "ariadne|graphene"
+}
+```
+
+and select either *ariadne* or *graphene*.
+
+## You have chosen graphene
 
 The app needs to be deploy for last because otherwise it cannot detect all the Django models and their types.
 You also need to configure the authentication proces. Hence you need t add "AUTHENTICATION_BACKENDS" in the `settings.py`:
@@ -37,7 +50,7 @@ After that, you need to properly configure the graphene, graphenedjango-extras a
 
 ```
 GRAPHENE={
-    "SCHEMA": "django_app_graphql.schema.schema",
+    "SCHEMA": "django_app_graphql.graphene.schema.schema",
     'SCHEMA_OUTPUT': 'graphql-schema.json',
     'SCHEMA_INDENT': 2,
     'MIDDLEWARE': [
@@ -67,12 +80,40 @@ GRAPHQL_JWT = {
 }
 ```
 
+## You have chosen ariadne
+
+In `settings.py` add:
+
+```
+INSTALLED_APPS = [
+    ...
+    "ariadne.contrib.django",
+]
+```
+
+Add templates (otherwise the playground won't work):
+
+```
+TEMPLATES = [
+    {
+        ...,
+        'APP_DIRS': True,
+        ...
+    },
+]
+```
+
+## Generic tweaks
+
 Finally you can configure this app, for instance:
 
 ```
 DJANGO_APP_GRAPHQL = {
+    "BACKEND_TYPE": "graphene",
     "EXPOSE_GRAPHIQL": True,
-    "GRAPHQL_SERVER_URL": ""
+    "GRAPHQL_SERVER_URL": "",
+    "ENABLE_GRAPHQL_FEDERATION": True,
+    "SAVE_GRAPHQL_SCHEMA": "output/schema.graphql"
 }
 ```
 

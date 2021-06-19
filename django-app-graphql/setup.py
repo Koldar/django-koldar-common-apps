@@ -63,7 +63,7 @@ setuptools.setup(
     },
     include_package_data=True,
     package_data={
-        "": ["package_data/*.*"],
+        PACKAGE_NAME: [f"data/graphql/ariadne/*.graphql"],
     },
     python_requires=PACKAGE_PYTHON_COMPLIANCE,
     # entry_points={"console_scripts": [f"{PACKAGE_EXE}={PACKAGE_MAIN_MODULE}:main"]},

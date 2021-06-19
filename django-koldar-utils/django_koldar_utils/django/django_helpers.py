@@ -3,6 +3,23 @@ from typing import Iterable
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.apps import apps
+
+
+def get_all_app_names() -> Iterable[str]:
+    """
+    :return: an iterable specifying all the app verbose names
+    """
+    for app in apps.get_app_configs():
+        yield app.verbose_name
+
+
+def get_all_app_install_directory() -> Iterable[str]:
+    """
+    :return: an iterable specifying all the isntallation directory of the app
+    """
+    for app in apps.get_app_configs():
+        yield app
 
 
 def get_app_label_of_model(model_type: type) -> str:

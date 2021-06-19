@@ -1,21 +1,15 @@
 import json
-import os
-import unittest
 from typing import Any, Dict, Union, Tuple, Optional, Set, Callable, List
 
 
 from jsonpath_ng.ext import parse as parse_ext
-from django import test as django_test
 # os.environ.setdefault("DJANGO_SETTINGS_MODULE", settings.SETTING_DIR)
 # import django
 # django.setup()
 
 
-from graphene.test import Client
 from graphene_django.utils.testing import GraphQLTestCase
 from requests import Response
-
-from django_app_graphql import schema
 
 
 class AbstractGraphQLTest(GraphQLTestCase):
