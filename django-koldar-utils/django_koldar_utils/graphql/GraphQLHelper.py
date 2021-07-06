@@ -1,4 +1,5 @@
-from typing import List, Tuple, Dict, Any, Callable, Union
+import abc
+from typing import List, Tuple, Dict, Any, Callable, Union, Optional
 
 import graphene
 import inflect as inflect
@@ -15,6 +16,200 @@ MUTATION_FIELD_DESCRIPTION = "Mutation return value. Do not explicitly use it."
 A prefix to put to every mutation return value"""
 
 
+class ICrudOperationNamer(abc.ABC):
+    """
+    Class used to determine crud operation names
+    """
+
+    @abc.abstractmethod
+    def get_create_name(self, django_type: type) -> Optional[str]:
+        """
+        fetch the name corresponding to the create mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :return: name of the create mutation. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_create_return_value_name(self, django_type: type) -> Optional[str]:
+        """
+        Fetch the name corresponding to the return value of the create mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :return return value of the creqte mutation. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_read_all_name(self, django_type: type) -> Optional[str]:
+        """
+        fetch the name corresponding to the read all query
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :return: name of the read all query. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_read_all_return_value_name(self, django_type: type, django_filter_instance) -> Optional[str]:
+        """
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :param django_filter_instance: instance of a class representing a django query set filter (the one that will be
+        used to implement the read all query)
+        :return: name of the return value fo the read all query. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_read_single_by_primary_key_name(self, django_type: type, primary_key_name: str) -> Optional[str]:
+        """
+        fetch the name corresponding to the read single by primary key mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :param primary_key_name: name of the primary key
+        :return: name of the read single by primary key mutation. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key: str, django_filter_instance) -> Optional[
+        str]:
+        """
+        fetch the name corresponding to the return value of read single by primary key mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :param primary_key: name fo the primary key of the model
+        :param django_filter_instance: instance of a class representing a django query set filter (the one that will be
+        used to implement the read all query)
+        :return: name of the return value of read single by primary key mutation. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_update_name(self, django_type: type) -> Optional[str]:
+        """
+        fetch the name corresponding to the update mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :return: name of the update mutation. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_update_return_value_name(self, django_type: type) -> Optional[str]:
+        """
+        fetch the return value name corresponding to the update mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :return: name of the return value of update mutation. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_delete_name(self, django_type: type) -> Optional[str]:
+        """
+        fetch the name corresponding to the delete mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :return: name of the delete mutation. If None we decide
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_delete_return_value_name(self, django_type: type) -> Optional[str]:
+        """
+        fetch the return value name corresponding to the delete mutation
+
+        :param django_type: type of the django model (the one extending models.Model)
+        :return: name of the return value of the delete mutation. If None we decide
+        """
+        pass
+
+
+class StandardCrudOperationNamer(ICrudOperationNamer):
+    """
+    Default implementation generating standard CRUD names
+    """
+
+    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key_name: str, django_filter_instance) -> Optional[
+        str]:
+        return None
+
+    def get_update_return_value_name(self, django_type: type) -> Optional[str]:
+        return None
+
+    def get_delete_return_value_name(self, django_type: type) -> Optional[str]:
+        return None
+
+    def get_read_all_return_value_name(self, django_type: type, django_filter_instance) -> Optional[str]:
+        return None
+
+    def get_create_name(self, django_type: type) -> Optional[str]:
+        return f"Create{django_type.__name__}"
+
+    def get_create_return_value_name(self, django_type: type) -> Optional[str]:
+        return None
+
+    def get_read_all_name(self, django_type: type) -> Optional[str]:
+        return f"GetAll{django_type.__name__}"
+
+    def get_read_single_by_primary_key_name(self, django_type: type, primary_key_name: str) -> Optional[str]:
+        return f"Get{django_type.__name__}By{stringcase.pascalcase(primary_key_name)}"
+
+    def get_update_name(self, django_type: type) -> Optional[str]:
+        f"UpdatePrimitive{django_type.__name__}"
+
+    def get_delete_name(self, django_type: type) -> Optional[str]:
+        return f"MarkInactive{django_type.__name__}"
+
+
+class NamespacedCrudOperationNamer(ICrudOperationNamer):
+    """
+    An operation namer that prefix the name of query and mutations with a string. Useful in federated schemas,
+    where multiple queries with similar names namy exist.
+    """
+
+    def __init__(self, prefix: str, suffix: str = None):
+        """
+        :param prefix: string to put before the model name in the query/mutation names
+        :param suffix: string to put after the model name in the query/mutation names
+        """
+        self.prefix = stringcase.pascalcase(str(prefix))
+        self.suffix = stringcase.pascalcase(str(suffix))
+
+    def get_create_name(self, django_type: type) -> Optional[str]:
+        return f"Create{self.prefix}{django_type.__name__}{self.suffix}"
+
+    def get_create_return_value_name(self, django_type: type) -> Optional[str]:
+        return f"{self.prefix}{django_type.__name__}{self.suffix}Created"
+
+    def get_read_all_name(self, django_type: type) -> Optional[str]:
+        return f"GetAll{self.prefix}{django_type.__name__}{self.suffix}"
+
+    def get_read_all_return_value_name(self, django_type: type, django_filter_instance) -> Optional[str]:
+        return f"{self.prefix}{stringcase.camelcase(django_filter_instance)}{self.suffix}"
+
+    def get_read_single_by_primary_key_name(self, django_type: type, primary_key_name: str) -> Optional[str]:
+        return f"Get{self.prefix}{django_type.__name__}By{stringcase.pascalcase(primary_key_name)}{self.suffix}"
+
+    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key_name: str, django_filter_instance) -> Optional[str]:
+        return f"{self.prefix}{django_type.__name__}By{stringcase.pascalcase(primary_key_name)}{self.suffix}"
+
+    def get_update_name(self, django_type: type) -> Optional[str]:
+        f"UpdatePrimitive{self.prefix}{django_type.__name__}{self.suffix}"
+
+    def get_update_return_value_name(self, django_type: type) -> Optional[str]:
+        f"{self.prefix}{django_type.__name__}{self.suffix}Updated"
+
+    def get_delete_name(self, django_type: type) -> Optional[str]:
+        return f"MarkInactive{self.prefix}{django_type.__name__}{self.suffix}"
+
+    def get_delete_return_value_name(self, django_type: type) -> Optional[str]:
+        return f"{self.prefix}{django_type.__name__}{self.suffix}Deleted"
+
+
 class GraphQLHelper(object):
     """
     Class used to generate relevant fields for graphql
@@ -29,6 +224,12 @@ class GraphQLHelper(object):
             permissions_required_read: List[str] = None,
             permissions_required_update: List[str] = None,
             permissions_required_delete: List[str] = None,
+            class_names: "ICrudOperationNamer" = None,
+            generate_create: bool = True,
+            generate_read_all: bool = True,
+            generate_read_single: bool = True,
+            generate_update: bool = True,
+            generate_delete: bool = True,
                 ) -> Tuple[type, type, type, type, type]:
         """
         Generate a default create, update, delete operations. Delete actually just set the active field set to false.
@@ -43,50 +244,86 @@ class GraphQLHelper(object):
         :param permissions_required_read: permissions used to read elements. If None the mutation does not required authentication
         :param permissions_required_update: permissions used to update elements. If None the mutation does not required authentication
         :param permissions_required_delete: permissions used to delete elements. If None the mutation does not required authentication
+        :param class_names: instance representing a structure that supplies the name of the queries and mutation to create.
+        :param generate_create: if true, we will generate the create mutation. Otherwise we will return None as the generated mutation class
+        :param generate_read_all: if true, we will generate the read all mutation. Otherwise we will return None as the generated mutation class
+        :param generate_read_single: if true, we will generate the read single mutatuion. Otherwise we will return None as the generated query class
+        :param generate_update: if true, we will generate the update mutatuion. Otherwise we will return None as the generated query class
+        :param generate_delete: if true, we will generate the delete mutatuion. Otherwise we will return None as the generated mutation class
+        :return: a tuple where each element is a class representing a mutation/query or None if the associated method "generate_" is set to False.
+            - create mutation type
+            - read all query type
+            - update mutation type
+            - delete mutation type
+            - read single element query type
         """
-        create = cls.generate_mutation_create(
-            django_type=django_type,
-            django_graphql_type=django_graphql_type,
-            django_input_type=django_input_type,
-            active_flag_name=active_field_name,
-            fields_to_check=create_compare_fields,
-            permissions_required=permissions_required_create
-        )
 
-        get_all_filter = filters_helpers.create_dynamic_active_django_filter("All", django_type, active_field_name, {})
-        read = cls.generate_query_from_filter_set(
-            return_single=False,
-            django_type=django_type,
-            django_graphql_type=django_graphql_type,
-            permissions_required=permissions_required_read,
-            filterset_type=get_all_filter,
-            query_class_name=lambda dt, ft: f"GetAll{dt}",
-        )
+        create = None
+        read_single = None
+        read_all = None
+        update = None
+        delete = None
 
+        if class_names is None:
+            class_names = StandardCrudOperationNamer()
         primary_key_name = django_helpers.get_name_of_primary_key(django_type)
-        get_single_filter = filters_helpers.create_django_filter_returning_one_value(primary_key_name, django_type, active_field_name, {primary_key_name: ["exact"]})
-        read_single = cls.generate_query_from_filter_set(
-            return_single=True,
-            django_type=django_type,
-            django_graphql_type=django_graphql_type,
-            permissions_required=permissions_required_read,
-            filterset_type=get_single_filter,
-        )
 
-        update = cls.generate_mutation_update_primitive_data(
-            django_type=django_type,
-            django_graphql_type=django_graphql_type,
-            django_input_type=django_input_type,
-            permissions_required=permissions_required_update
-        )
-        delete = cls.generate_mutation_mark_inactive(
-            django_type=django_type,
-            django_graphql_type=django_graphql_type,
-            django_input_type=django_input_type,
-            active_flag_name=active_field_name,
-            permissions_required=permissions_required_delete
-        )
-        return create, read, update, delete, read_single
+        if generate_create:
+            create = cls.generate_mutation_create(
+                django_type=django_type,
+                django_graphql_type=django_graphql_type,
+                django_input_type=django_input_type,
+                active_flag_name=active_field_name,
+                fields_to_check=create_compare_fields,
+                permissions_required=permissions_required_create,
+                mutation_class_name=class_names.get_create_name(django_type),
+                output_name=class_names.get_create_return_value_name(django_type)
+            )
+
+        if generate_read_all:
+            get_all_filter = filters_helpers.create_dynamic_active_django_filter("All", django_type, active_field_name, {})
+            read_all = cls.create_authenticated_list(
+                django_type=django_type,
+                django_graphql_type=django_graphql_type,
+                get_all_filter=get_all_filter,
+                permissions_required=permissions_required_read,
+                query_class_name=lambda dt, ft: class_names.get_read_all_name(django_type),
+                output_name=class_names.get_read_all_return_value_name(django_type, get_all_filter)
+            )
+
+        if generate_read_single:
+            get_single_filter = filters_helpers.create_django_filter_returning_one_value(primary_key_name, django_type, active_field_name, {primary_key_name: ["exact"]})
+            read_single = cls.generate_query_from_filter_set(
+                return_single=True,
+                django_type=django_type,
+                django_graphql_type=django_graphql_type,
+                permissions_required=permissions_required_read,
+                filterset_type=get_single_filter,
+                query_class_name=lambda dt, ft: class_names.get_read_single_by_primary_key_name(django_type, primary_key_name),
+                output_name=class_names.get_read_single_by_primary_key_return_value_name(django_type, primary_key_name, get_single_filter)
+            )
+
+        if generate_update:
+            update = cls.generate_mutation_update_primitive_data(
+                django_type=django_type,
+                django_graphql_type=django_graphql_type,
+                django_input_type=django_input_type,
+                permissions_required=permissions_required_update,
+                mutation_class_name=class_names.get_update_name(django_type),
+                output_name=class_names.get_update_return_value_name(django_type)
+            )
+
+        if generate_delete:
+            delete = cls.generate_mutation_mark_inactive(
+                django_type=django_type,
+                django_graphql_type=django_graphql_type,
+                django_input_type=django_input_type,
+                active_flag_name=active_field_name,
+                permissions_required=permissions_required_delete,
+                mutation_class_name=class_names.get_delete_name(django_type),
+                output_name=class_names.get_delete_return_value_name(django_type),
+            )
+        return create, read_all, update, delete, read_single
 
     # QUERY MUTATION CONSTRUCTION
 
@@ -131,6 +368,29 @@ class GraphQLHelper(object):
         """
         arguments['token'] = cls.jwt_token()
         return cls.create_simple_query(return_type=return_type, arguments=arguments, description=description)
+
+    @classmethod
+    def create_authenticated_list(cls, django_type: type, django_graphql_type: type, get_all_filter: any, permissions_required: List[str], query_class_name: Union[str, Callable[[type, type], str]] = None, output_name: Union[str, Callable[[str, any], str]] = None) -> type:
+        """
+        Create an authentication query allowing you to to list all the content of a particular model satisfying the specified
+        filter. The return type of this query is always a list.
+
+        :param django_type: a type representing the models.Model subclass
+        :param django_graphql_type: a type representing the DjangoObjectType of the corresponding django_type
+        :param get_all_filter: django query filter that implements the output of the query
+        :param permissions_required: set of permissions the authenticated query needs to satisfy
+        :return: type representing the graphene query list.
+        """
+        read_all = cls.generate_query_from_filter_set(
+            return_single=False,
+            django_type=django_type,
+            django_graphql_type=django_graphql_type,
+            permissions_required=permissions_required,
+            filterset_type=get_all_filter,
+            query_class_name=query_class_name,
+            output_name=output_name,
+        )
+        return read_all
 
     @classmethod
     def create_authenticated_query(cls, query_class_name: str, description: str, arguments: Dict[str, type],
@@ -401,7 +661,7 @@ class GraphQLHelper(object):
         return mutation_class
 
     @classmethod
-    def generate_mutation_create(cls, django_type: type, django_graphql_type: type, django_input_type: type, active_flag_name: str = None, fields_to_check: List[str] = None, description: str = None, input_name: str = None, output_name: str = None, permissions_required: List[str] = None) -> type:
+    def generate_mutation_create(cls, django_type: type, django_graphql_type: type, django_input_type: type, active_flag_name: str = None, fields_to_check: List[str] = None, description: str = None, input_name: str = None, output_name: str = None, permissions_required: List[str] = None, mutation_class_name: Union[str, Callable[[str], str]] = None) -> type:
         """
         Create a mutation that adds a new element in the database.
         We will generate a mutation that accepts a single input parameter. It checks if the input is not already present in the database and if not, it adds it.
@@ -419,7 +679,13 @@ class GraphQLHelper(object):
         :param permissions_required: if absent, the mutation does not require authentication. If it is non null,
             the mutation needs authentication as well as all the permissions in input.
             When authenticating a mutation, an additional "token" argument is always added
+        :param mutation_class_name: a function that generates the name of the mutation type. Input argument is django_type.__name__. The output is
+            the mutation name to generate. The name is then converted into pascal case automatically. If left unspecified, it is "Create{django_type.__name__}".
+            Can also be a string. Note that at the end, this pascal case name will be automatically converted by graphene into camel case.
         """
+
+        if mutation_class_name is None:
+            mutation_class_name = f"Create{django_type.__name__}"
         if active_flag_name is None:
             active_flag_name = "active"
         if fields_to_check is None:
@@ -438,6 +704,9 @@ class GraphQLHelper(object):
             input_name = stringcase.camelcase(django_type.__name__)
         if output_name is None:
             output_name = stringcase.camelcase(django_type.__name__)
+        if hasattr(mutation_class_name, "__call__"):
+            # if create_mutation_name is a function, call it
+            mutation_class_name = mutation_class_name(django_type.__name__)
 
         def body(mutation_class, info, *args, **kwargs) -> any:
             input = kwargs[input_name]
@@ -464,7 +733,7 @@ class GraphQLHelper(object):
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
-            mutation_class_name=f"Create{django_type.__name__}",
+            mutation_class_name=str(mutation_class_name),
             description=description,
             arguments=arguments,
             return_type={
@@ -476,7 +745,7 @@ class GraphQLHelper(object):
     @classmethod
     def generate_mutation_update_primitive_data(cls, django_type: type, django_graphql_type: type, django_input_type: type,
                                  description: str = None, input_name: str = None,
-                                 output_name: str = None, permissions_required: List[str] = None) -> type:
+                                 output_name: str = None, permissions_required: List[str] = None, mutation_class_name: Union[str, Callable[[str], str]] = None) -> type:
         """
         Create a mutation that revise a previously added element in the database to a newer version.
         This mutation updates only the primitive fields within the entity, jnot the relationships.
@@ -495,9 +764,14 @@ class GraphQLHelper(object):
         :param permissions_required: if absent, the mutation does not require authentication. If it is non null,
             the mutation needs authentication as well as all the permissions in input.
             When authenticating a mutation, an additional "token" argument is always added
+        :param mutation_class_name: a function that generates the name of the mutation type. Input argument is django_type.__name__. The output is
+            the mutation name to generate. The name is then converted into pascal case automatically. If left unspecified, it is "Create{django_type.__name__}".
+            Can also be a string. Note that at the end, this pascal case name will be automatically converted by graphene into camel case.
         """
 
         primary_key_name = django_helpers.get_name_of_primary_key(django_type)
+        if mutation_class_name is None:
+            mutation_class_name = f"UpdatePrimitive{django_type.__name__}",
         if description is None:
             description = f"""Allows you to create a new instance of {django_type.__name__}. 
                     If the object is already present we throw an exception.
@@ -513,6 +787,8 @@ class GraphQLHelper(object):
             input_name = stringcase.camelcase(django_type.__name__)
         if output_name is None:
             output_name = stringcase.camelcase(django_type.__name__)
+        if hasattr(mutation_class_name, "__call__"):
+            mutation_class_name = mutation_class_name(django_type.__name__)
 
         def body(mutation_class, info, *args, **kwargs) -> any:
             primary_key_value: str = kwargs[primary_key_name]
@@ -546,7 +822,7 @@ class GraphQLHelper(object):
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
-            mutation_class_name=f"UpdatePrimitive{django_type.__name__}",
+            mutation_class_name=str(mutation_class_name),
             description=description,
             arguments=arguments,
             return_type={
@@ -561,7 +837,8 @@ class GraphQLHelper(object):
                                          django_input_type: type,
                                          description: str = None, input_name: str = None,
                                          output_name: str = None,
-                                         permissions_required: List[str] = None) -> type:
+                                         permissions_required: List[str] = None,
+                                         mutation_class_name: Union[str, Callable[[str], str]] = None) -> type:
         """
         Create a mutation that deletes a row stored in the database. Depending on the on_delete, this may lead to the removal of other dependant rows
         We will generate a mutation that accepts a single array of integers, each representing the ids to delete.
@@ -580,9 +857,16 @@ class GraphQLHelper(object):
         :param permissions_required: if absent, the mutation does not require authentication. If it is non null,
             the mutation needs authentication as well as all the permissions in input.
             When authenticating a mutation, an additional "token" argument is always added
+        :param mutation_class_name: a function that generates the name of the mutation type. Input argument is django_type.__name__. The output is
+            the mutation name to generate. The name is then converted into pascal case automatically. If left unspecified, it is "Create{django_type.__name__}".
+            Can also be a string. Note that at the end, this pascal case name will be automatically converted by graphene into camel case.
         """
 
         primary_key_name = django_helpers.get_name_of_primary_key(django_type)
+        if mutation_class_name is None:
+            mutation_class_name = f"Delete{django_type.__name__}"
+        if hasattr(mutation_class_name, "__call__"):
+            mutation_class_name = mutation_class_name(django_type.__name__)
         if description is None:
             description = f"""Allows you to remove a set of preexisting instances of {django_type.__name__}. 
                             If an object is not present in the database, we will skip the object deletion.
@@ -622,7 +906,7 @@ class GraphQLHelper(object):
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
-            mutation_class_name=f"Delete{django_type.__name__}",
+            mutation_class_name=mutation_class_name,
             description=description,
             arguments=arguments,
             return_type={
@@ -638,7 +922,8 @@ class GraphQLHelper(object):
                                  description: str = None, input_name: str = None,
                                  output_name: str = None,
                                  active_flag_name: str = None,
-                                 permissions_required: List[str] = None) -> type:
+                                 permissions_required: List[str] = None,
+                                mutation_class_name: Union[str, Callable[[str], str]] = None) -> type:
         """
         Create a mutation that simulate a deletes of a row stored in the database by setting the corresponding active flag to false.
         This usually set as inactive only the given row.
@@ -659,9 +944,16 @@ class GraphQLHelper(object):
         :param permissions_required: if absent, the mutation does not require authentication. If it is non null,
             the mutation needs authentication as well as all the permissions in input.
             When authenticating a mutation, an additional "token" argument is always added
+        :param mutation_class_name: a function that generates the name of the mutation type. Input argument is django_type.__name__. The output is
+            the mutation name to generate. The name is then converted into pascal case automatically. If left unspecified, it is "Create{django_type.__name__}".
+            Can also be a string. Note that at the end, this pascal case name will be automatically converted by graphene into camel case.
         """
 
         primary_key_name = django_helpers.get_name_of_primary_key(django_type)
+        if mutation_class_name is None:
+            mutation_class_name = f"MarkInactive{django_type.__name__}"
+        if hasattr(mutation_class_name, "__call__"):
+            mutation_class_name = mutation_class_name(django_type.__name__)
         if active_flag_name is None:
             active_flag_name = "active"
         if description is None:
@@ -702,7 +994,7 @@ class GraphQLHelper(object):
             body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
-            mutation_class_name=f"MarkInactive{django_type.__name__}",
+            mutation_class_name=mutation_class_name,
             description=description,
             arguments=arguments,
             return_type={

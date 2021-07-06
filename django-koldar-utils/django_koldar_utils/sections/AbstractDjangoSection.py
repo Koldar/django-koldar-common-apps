@@ -5,6 +5,11 @@
 #
 #
 # class AbstractDjangoSection(abc.ABC):
+#     """
+#     An alternative way used to configure settings.py django.
+#     Use to sovle dependencies of INSTALLED_APPS, automatically add piece of
+#     configurations in settings.py and configure authentication backends.
+#     """
 #
 #     def __get_fullname(self):
 #         klass = self.__class__

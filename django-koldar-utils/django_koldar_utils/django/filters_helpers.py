@@ -112,6 +112,7 @@ def create_dynamic_active_django_filter(filter_name: str, model_type: type, acti
 
     return filter_to_return
 
+    # Example of a generated class
     # class F(django_filters.FilterSet):
     #     username = CharFilter(method='my_custom_filter')
     #
