@@ -13,6 +13,16 @@ class DjangoAppGraphQLAppConf(AppConf):
     """
     Type of the backend. May either be "graphene" or "ariadne". 
     """
+    ADD_DUMMY_QUERIES_IF_ABSENT = False
+    """
+    If no queries have been added by the user, forcibly add some of them ourselves.
+    Might clashes with federation, hence the default is false.
+    """
+    ADD_DUMMY_MUTATIONS_IF_ABSENT = False
+    """
+    If no mutations have been added by the user, forcibly add some of them ourselves.
+    Might clashes with federation, hence the default is false.
+    """
     EXPOSE_GRAPHIQL = True
     """
     If set, we will expose the graphiql UI

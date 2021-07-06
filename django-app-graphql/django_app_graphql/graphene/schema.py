@@ -11,6 +11,7 @@ from django_app_graphql.conf import settings
 
 LOG = logging.getLogger(__name__)
 
+schema: graphene.Schema = None
 
 # Dummy query mutations
 class DummyMutation(object):
@@ -44,45 +45,60 @@ class DummyQuery(object):
         return f"hello {name}"
 
 
-# Query
-if len(graphql_subquery.query_classes) == 0:
-    # add a query. graphene requires at least one
-    graphql_subquery.query_classes.append(DummyQuery)
+def create_schema():
+    # Query
+    if len(graphql_subquery.query_classes) == 0 and settings.DJANGO_APP_GRAPHQL["ADD_DUMMY_QUERIES_IF_ABSENT"]:
+        # add a query. graphene requires at least one
+        LOG.warning(f"No queries present. Add some dummy queries")
+        graphql_subquery.query_classes.append(DummyQuery)
 
-LOG.info(f"queries are: {graphql_subquery.query_classes}")
-bases = tuple(graphql_subquery.query_classes + [graphene.ObjectType, object])
-for cls in bases:
-    LOG.info("Including '{}' in global GraphQL Query...".format(cls.__name__))
-Query = type('Query', bases, {})
+    LOG.info(f"queries are: {graphql_subquery.query_classes}")
+    bases = tuple(graphql_subquery.query_classes + [graphene.ObjectType, object])
+    for cls in bases:
+        if cls.__name__ in ("object", "ObjectType", "ObjectTypeOptions"):
+            continue
+        LOG.info("Including '{}' in global GraphQL Query...".format(cls.__name__))
+    Query = type('Query', bases, {})
+
+    # Mutation
+    if len(graphql_submutation.mutation_classes) == 0 and settings.DJANGO_APP_GRAPHQL["ADD_DUMMY_MUTATIONS_IF_ABSENT"]:
+        # add a query. graphene requires at least one
+        graphql_submutation.mutation_classes.append(DummyMutation)
+
+    LOG.info(f"mutations are: {graphql_submutation.mutation_classes}")
+    bases = tuple(graphql_submutation.mutation_classes + [graphene.Mutation, graphene.ObjectType, object])
+    properties = {}
+    for cls in bases:
+        # some base classes needs to be ignored since they are not queries or mutations
+        if cls.__name__ in ("object", "ObjectType", "ObjectTypeOptions"):
+            continue
+        LOG.info("Including '{}' in global GraphQL Mutation...".format(cls.__name__))
+        try:
+            name = stringcase.camelcase(cls.__name__)
+            properties[name] = cls.Field()
+        except Exception as e:
+            LOG.warning(f"Ignoring exception {e} while adding {cls} to mutations")
+
+    Mutation = type('Mutation', bases, properties)
+
+    if settings.DJANGO_APP_GRAPHQL["ENABLE_GRAPHQL_FEDERATION"]:
+        LOG.info(f"Building graphQL schema with federation support")
+        schema = graphene_federation.build_schema(query=Query, mutation=Mutation)
+    else:
+        LOG.info(f"Building graphQL schema without federatio nsupport")
+        schema = graphene.Schema(query=Query, mutation=Mutation)
+
+    if settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"] is not None:
+        p = settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"]
+        LOG.debug(f"Saving the whole generated graphql schema in {os.path.abspath(p)}")
+        with open(p, encoding="utf8", mode="w") as f:
+            f.write(str(schema))
+
+    return schema
 
 
-# Mutation
-if len(graphql_submutation.mutation_classes) == 0:
-    # add a query. graphene requires at least one
-    graphql_submutation.mutation_classes.append(DummyMutation)
+if schema is None:
+    schema = create_schema()
 
-LOG.info(f"mutations are: {graphql_submutation.mutation_classes}")
-bases = tuple(graphql_submutation.mutation_classes + [graphene.Mutation, graphene.ObjectType, object])
-properties = {}
-for cls in bases:
-    LOG.info("Including '{}' in global GraphQL Mutation...".format(cls.__name__))
-    try:
-        name = stringcase.camelcase(cls.__name__)
-        properties[name] = cls.Field()
-    except Exception as e:
-        LOG.warning(f"Ignoring exception {e} while adding {cls} to mutations")
 
-Mutation = type('Mutation', bases, properties)
 
-if settings.DJANGO_APP_GRAPHQL["ENABLE_GRAPHQL_FEDERATION"]:
-    LOG.info(f"Building graphQL schema with federation support")
-    schema = graphene_federation.build_schema(query=Query, mutation=Mutation)
-else:
-    LOG.info(f"Building graphQL schema without federatio nsupport")
-    schema = graphene.Schema(query=Query, mutation=Mutation)
-
-if settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"] is not None:
-    p = settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"]
-    LOG.debug(f"Saving the whole generated graphql schema in {os.path.abspath(p)}")
-    with open(p, encoding="utf8", mode="w") as f:
-        f.write(str(schema))
