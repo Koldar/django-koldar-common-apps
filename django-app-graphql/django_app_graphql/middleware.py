@@ -5,7 +5,7 @@ from django.http import HttpRequest, HttpResponse
 
 import logging
 
-from django_koldar_utils.graphql.AbstractGrapheneMiddleware import AbstractGrapheneMiddleware
+from django_koldar_utils.graphql.graphene.AbstractGrapheneMiddleware import AbstractGrapheneMiddleware
 
 LOG = logging.getLogger(__name__)
 

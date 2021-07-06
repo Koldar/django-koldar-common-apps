@@ -34,6 +34,12 @@ class Orm:
 
     @classmethod
     def get_current_app_name(cls) -> str:
+        """
+        Fetch the latest current app involved in the stacktrace.
+        This function uses introspection of stacktrace to determine the application
+
+        :return base directory of the app, which ususally is also the label of the app
+        """
         for frame in reversed(list(filter(lambda x: "<string>" not in x, filter(lambda x: os.path.join("utils", "Orm.py") not in x,
                                                           filter(lambda x: "pydev" not in x,
                                                                  traceback.format_stack()))))):
@@ -705,8 +711,38 @@ class Orm:
             help_text=description
         )
 
-    @staticmethod
-    def primary_id(column_name: str = None) -> models.BigAutoField:
+    @classmethod
+    def required_external_id(cls, column_name: str = None, description: str = None) -> models.BigIntegerField:
+        """
+        Represents an id that represents an object external from this database.
+        For instance, if the users are stored in another database but you want to referecen a user from this local
+        database, you can use this field
+
+        :param column_name: name of the column to create
+        :param description: help text of the column
+        """
+        return Orm.generic_field(
+            field_type=models.BigIntegerField,
+            null=False,
+            blank=False,
+            choices=None,
+            db_column=column_name,
+            db_index=False,
+            default=None,
+            error_messages=None,
+            help_text=description,
+            primary_key=False,
+            unique=False,
+            unique_for_date=None,
+            unique_for_year=None,
+            unique_for_month=None,
+            verbose_name=None,
+            validators=[],
+            max_length=None
+        )
+
+    @classmethod
+    def primary_id(cls, column_name: str = None, description: str = None) -> models.BigAutoField:
         """
         create a rpimary id
         :param column_name: name of the column to create
@@ -714,4 +750,6 @@ class Orm:
         """
         if column_name is None:
             column_name = "id"
-        return models.BigAutoField(db_column=column_name, primary_key=True)
+        if description is None:
+            description = "Unique Id representing the concept"
+        return models.BigAutoField(db_column=column_name, primary_key=True, help_text=description)

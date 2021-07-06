@@ -43,6 +43,19 @@ def get_name_of_primary_key(model_type: type) -> str:
     return model_type._meta.pk.name
 
 
+def get_primary_key_value(model: models.Model) -> any:
+    """
+    get primary key value of a given model
+
+    :param model: instance of the model whose primary key we need to fetch
+    :return: value of the primary key
+    """
+    name = get_name_of_primary_key(type(model))
+    return getattr(model, name)
+
+
+
+
 def are_we_in_migration() -> bool:
     """
     Check if we a re runnign in a migration or not
@@ -64,5 +77,16 @@ def get_primitive_fields(django_type: type) -> Iterable[models.Field]:
     for f in django_type._meta.get_fields():
         if not f.is_relation:
             yield f
+
+
+def get_salt_from_password_field(password_field_value: str) -> str:
+    """
+    fetch the salt from the password field within the database
+
+    :param password_field_value: the string that is stored in the database, as in
+    :return: salt used to hash the password
+    :see: https://docs.djangoproject.com/en/3.2/topics/auth/passwords/
+    """
+    return password_field_value.split("$")[2]
 
 

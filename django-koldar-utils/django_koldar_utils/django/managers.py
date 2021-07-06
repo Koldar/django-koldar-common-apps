@@ -98,13 +98,15 @@ class IManager(abc.ABC):
             return None
 
 
-class ExtendedPolymorphicManager(Generic[TMODEL], IManager, PolymorphicManager):
+#todo readd Generic[TMODEL],
+class ExtendedPolymorphicManager(IManager, PolymorphicManager):
 
     def _get(self, *args, **kwargs):
         return self.model_class._default_manager.get(*args, **kwargs)
 
 
-class ExtendedManager(Generic[TMODEL], IManager, models.Manager):
+#todo readd Generic[TMODEL],
+class ExtendedManager(IManager, models.Manager):
     """
     A manager which provides common utilities
     """
@@ -113,7 +115,8 @@ class ExtendedManager(Generic[TMODEL], IManager, models.Manager):
         return self.model_class._default_manager.get(*args, **kwargs)
 
 
-class ExtendedUserManager(Generic[TMODEL], IManager, UserManager):
+#todo readd Generic[TMODEL],
+class ExtendedUserManager(IManager, UserManager):
     """
     Extension of the UserManager implementation
     """

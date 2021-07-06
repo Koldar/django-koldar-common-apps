@@ -472,14 +472,14 @@ class GraphQLHelper(object):
             (graphene.ObjectType, ),
             {
                 "__doc__": description,
+                f"resolve_{output_name}": perform_query,
                 output_name: graphene.Field(return_type, args=arguments, description=description),
-                f"resolve_{output_name}": perform_query
             }
         )
         # Apply decorator to auto detect queries
-        query_class = graphql_decorators.graphql_subquery(query_class)
+        decorated_query_class = graphql_decorators.graphql_subquery(query_class)
 
-        return query_class
+        return decorated_query_class
 
     @classmethod
     def generate_query_from_filter_set(cls, django_type: type, django_graphql_type: type, filterset_type: type, return_single: bool, query_class_name: Union[str, Callable[[str, str], str]] = None, permissions_required: List[str] = None, output_name: str = None) -> type:
@@ -1013,7 +1013,9 @@ class GraphQLHelper(object):
             body=body
         )
 
-    # QUERY ARGUMENTS
+    # Graphene Object is
+
+    # QUERY ARGUMENTS AND DJANGO GRAPHQL TYPE DEFINITION
 
     @classmethod
     def jwt_token(cls) -> graphene.String:
@@ -1023,17 +1025,41 @@ class GraphQLHelper(object):
             """)
 
     @classmethod
-    def required_id(cls, entity: Union[type, str] = None) -> graphene.ID:
+    def required_id(cls, entity: Union[type, str] = None, description: str = None) -> graphene.ID:
         """
         The graphql query/mutation generates an id of  given entity
+
+        :param entity: entity whose id we need to store. Can be either a type or a string. The field is only used for
+        documentation, not for actual code
+        :param description: additional description allowing you to further document the field.
         """
         if entity is not None:
             if isinstance(entity, type):
                 entity = entity.__name__
-            desc = f"identifier uniquely representing a {entity} within the system"
+            desc = f"identifier uniquely representing a {entity} within the system. {description}"
         else:
-            desc = f"Unique identifier representing the involved entity"
+            desc = f"Unique identifier representing the involved entity. {description}"
         return graphene.ID(required=True, description=desc)
+
+    @classmethod
+    def required_list_of_nonnull_elements(cls, entity: Union[type, str, Callable[[], type]], description: str = None):
+        """
+        A django object may have associated a list of elements. the list itself needs to be present
+        and all elements inside that list needs not to be null
+
+        :param entity: object to be fed into a graphene.List. Either a type, a string representing a type
+        or a supplier function yielding the type of cell the list contains. If it is a string, for federations
+        it is required to specify the full module path (since reference may be present).
+        :param description: An optional description that can be used to improve graphql query documentation
+        """
+
+        if isinstance(entity, type):
+            desc = f"Required list of elements, each of type {entity.__name__}. {description}"
+        elif hasattr(entity, "__call__"):
+            desc = f"Required list of {entity}, each of them non null. {description}"
+        elif isinstance(entity, str):
+            desc = f"Required list of elements, each of type {entity}. {description}"
+        return graphene.List(entity, required=True, description=desc)
 
     @classmethod
     def required_boolean(cls, description: str = None) -> graphene.Boolean:
@@ -1048,6 +1074,13 @@ class GraphQLHelper(object):
         a reference of the value fo a field
         """
         return graphene.String(required=True, description=description)
+
+    @classmethod
+    def required_int(cls, description: str = None) -> graphene.String:
+        """
+        an int that needs to be specified
+        """
+        return graphene.Int(required=True, description=description)
 
     # MUTATION ARGUMENTS
 
