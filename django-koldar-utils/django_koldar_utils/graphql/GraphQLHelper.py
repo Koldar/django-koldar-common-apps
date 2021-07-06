@@ -210,6 +210,15 @@ class NamespacedCrudOperationNamer(ICrudOperationNamer):
         return f"{self.prefix}{django_type.__name__}{self.suffix}Deleted"
 
 
+class FederationCrudOperationNamer(NamespacedCrudOperationNamer):
+    """
+    Class tuned for federated schemas
+    """
+
+    def __init__(self, namespace: str):
+        super().__init__(prefix=namespace, suffix="")
+
+
 class GraphQLHelper(object):
     """
     Class used to generate relevant fields for graphql
