@@ -16,6 +16,7 @@ pip install django-koldar-utils
  * convenience class to easily create django backends, middlesware, validators;
  * `ArrowField` implementation (taken from `django-arrow-field`);
  * convenience methods to interact with django framework without remembering how to do certain tasks;
+ * classes used to create graphql CRUD operation easily;
 
 # Upload new version
 
