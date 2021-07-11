@@ -139,6 +139,8 @@ def create_saved_crud_permissions(model: type, concept: str = None) -> Tuple[Per
 
 
 
+
+
 def ensure_user_has_permissions(perm):
     """
     A copy of permission_required where the error generates the missing permissions

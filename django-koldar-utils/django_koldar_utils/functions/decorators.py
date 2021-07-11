@@ -17,17 +17,17 @@ def create_stateless_decorator(callable: Callable[["f", "args", "kwargs", "dargs
         The return value is the value the decorator needs to return
     """
 
-    def my_decorator(*decorator_arg, **decorators_kwargs):
-        def my_decorator(func):
+    def stateless_decorator_generator(*decorator_arg, **decorators_kwargs):
+        def stateless_decorator(func):
             @functools.wraps(func)
             def wrapper(*func_args, **func_kwargs):
                 return callable(func, func_args, func_kwargs, decorator_arg, decorators_kwargs)
 
             return wrapper
 
-        return my_decorator
+        return stateless_decorator
 
-    return my_decorator
+    return stateless_decorator_generator
 
 
 def create_stateful_decorator(callable: Callable[[any, "f", "args", "kwargs", "dargs", "dkwargs"], any], state: type = None):

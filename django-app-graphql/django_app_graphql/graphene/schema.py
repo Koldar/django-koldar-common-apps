@@ -11,7 +11,7 @@ from django_app_graphql.conf import settings
 
 LOG = logging.getLogger(__name__)
 
-schema: graphene.Schema = None
+SCHEMA: graphene.Schema = None
 
 # Dummy query mutations
 class DummyMutation(object):
@@ -70,14 +70,18 @@ def create_schema():
     properties = {}
     for cls in bases:
         # some base classes needs to be ignored since they are not queries or mutations
-        if cls.__name__ in ("object", "ObjectType", "ObjectTypeOptions"):
+        if cls.__name__ in ("object", "ObjectType", "ObjectTypeOptions", "Mutation"):
             continue
         LOG.info("Including '{}' in global GraphQL Mutation...".format(cls.__name__))
         try:
             name = stringcase.camelcase(cls.__name__)
+            if not hasattr(cls, "_meta") and hasattr(cls, "Meta"):
+                # Sometimes a class has "Meta" attribute, but django requires a "_meta" attribute. Add it to the class
+                setattr(cls, "_meta", getattr(cls, "Meta"))
             properties[name] = cls.Field()
         except Exception as e:
-            LOG.warning(f"Ignoring exception {e} while adding {cls} to mutations")
+            LOG.warning(f"Ignoring exception {e} while adding {cls} to mutations!")
+            LOG.exception(e)
 
     Mutation = type('Mutation', bases, properties)
 
@@ -97,8 +101,8 @@ def create_schema():
     return schema
 
 
-if schema is None:
-    schema = create_schema()
+if SCHEMA is None:
+    SCHEMA = create_schema()
 
 
 

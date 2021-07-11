@@ -50,7 +50,7 @@ After that, you need to properly configure the graphene, graphenedjango-extras a
 
 ```
 GRAPHENE={
-    "SCHEMA": "django_app_graphql.graphene.schema.schema",
+    "SCHEMA": "django_app_graphql.graphene.schema.SCHEMA",
     'SCHEMA_OUTPUT': 'graphql-schema.json',
     'SCHEMA_INDENT': 2,
     'MIDDLEWARE': [
@@ -102,6 +102,8 @@ TEMPLATES = [
     },
 ]
 ```
+
+Ariadne is in unstable development (I don't know if it will ever be supported)
 
 ## Generic tweaks
 
