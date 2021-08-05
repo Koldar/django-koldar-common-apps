@@ -2,6 +2,7 @@ import abc
 from typing import TypeVar, Optional, Set, Generic
 
 from django.contrib.auth.backends import BaseBackend
+from django.contrib.auth.models import Permission
 
 TUSER = TypeVar("TUSER")
 TPERMISSION = TypeVar("TPERMISSION")
@@ -81,7 +82,7 @@ class AbstractDjangoBackend(Generic[TUSER, TUSER_ID, TPERMISSION], BaseBackend, 
         """
         return super().get_all_permissions(user_obj, obj)
 
-    def has_perm(self, user_obj: TUSER, perm: any, obj=None) -> bool:
+    def has_perm(self, user_obj: TUSER, perm: TPERMISSION, obj=None) -> bool:
         """
         Check if a user has a partiular permission
 
@@ -89,5 +90,6 @@ class AbstractDjangoBackend(Generic[TUSER, TUSER_ID, TPERMISSION], BaseBackend, 
             It may as well be a string representation of it
         :return: true if the user has the specified permission, false otherwise
         """
+        assert isinstance(perm, Permission), f"permission {perm} is not of type TPERMISSION"
         return super().has_perm(user_obj, perm, obj)
 

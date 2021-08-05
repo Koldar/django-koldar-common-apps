@@ -139,25 +139,3 @@ def create_saved_crud_permissions(model: type, concept: str = None) -> Tuple[Per
 
 
 
-
-
-def ensure_user_has_permissions(perm):
-    """
-    A copy of permission_required where the error generates the missing permissions
-    """
-
-    def decorator(f):
-        @functools.wraps(f)
-        @decorators.context(f)
-        def wrapper(context, *args, **kwargs):
-            if isinstance(perm, str):
-                perms = (perm,)
-            else:
-                perms = perm
-            missing_permissions = list(filter(lambda p: not context.user.has_perm(p), perms))
-            if len(missing_permissions) > 0:
-                raise PermissionDenied(
-                    f"The user {context.user} do not have the required permissions {', '.join(missing_permissions)} for accessing the function.")
-            return f(*args, **kwargs)
-        return wrapper
-    return decorator
