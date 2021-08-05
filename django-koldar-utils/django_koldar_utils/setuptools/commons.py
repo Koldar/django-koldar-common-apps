@@ -198,7 +198,7 @@ class AbstractScriptSetup(abc.ABC):
         return f'{self.main_package}.tests'
 
     def read_file_content(self, name: str) -> str:
-        return open(os.path.join(os.path.dirname(__file__), name)).read()
+        return open(name).read()
 
     def handle_version(self) -> str:
         if "update_version_patch" in sys.argv:
