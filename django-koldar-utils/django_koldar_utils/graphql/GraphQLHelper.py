@@ -447,7 +447,7 @@ class GraphQLHelper(object):
             arguments=arguments,
             output_name=stringcase.camelcase(query_class_name),
             return_type=return_type,
-            body=auth_decorators.ensure_login_required()(auth_decorators.ensure_user_has_permissions(permissions_required)(body))
+            body=auth_decorators.graphql_ensure_login_required()(auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body))
         )
 
     @classmethod
@@ -586,8 +586,8 @@ class GraphQLHelper(object):
         if permissions_required is not None:
             # add token and authentication decorators
             arguments[token_name] = cls.argument_jwt_token()
-            body = auth_decorators.ensure_login_required()(body)
-            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.graphql_ensure_login_required()(body)
+            body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
 
         result = cls.create_query(
             query_class_name=query_class_name,
@@ -690,7 +690,7 @@ class GraphQLHelper(object):
                 "Arguments": mutation_class_meta,
                 "__doc__": description,
                 **return_type,
-                "mutate": auth_decorators.ensure_login_required()(auth_decorators.ensure_user_has_permissions(required_permissions)(mutate))
+                "mutate": auth_decorators.graphql_ensure_login_required()(auth_decorators.graphql_ensure_user_has_permissions(required_permissions)(mutate))
             }
         )
         # Apply decorator to auto detect mutations
@@ -770,8 +770,8 @@ class GraphQLHelper(object):
         arguments[input_name] = cls.argument_required_input(django_input_type, description="The object to add into the database. id should not be populated. ")
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = auth_decorators.ensure_login_required()(body)
-            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.graphql_ensure_login_required()(body)
+            body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=str(mutation_class_name),
@@ -862,8 +862,8 @@ class GraphQLHelper(object):
                                                                description="The object that will update the one present in the database.")
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = auth_decorators.ensure_login_required()(body)
-            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.graphql_ensure_login_required()(body)
+            body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=str(mutation_class_name),
@@ -949,8 +949,8 @@ class GraphQLHelper(object):
         arguments[input_name] = cls.argument_required_id_list(django_type.__name__)
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = auth_decorators.ensure_login_required()(body)
-            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.graphql_ensure_login_required()(body)
+            body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=mutation_class_name,
@@ -1041,8 +1041,8 @@ class GraphQLHelper(object):
         arguments[input_name] = cls.argument_required_id_list(django_type.__name__)
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = auth_decorators.ensure_login_required()(body)
-            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.graphql_ensure_login_required()(body)
+            body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=mutation_class_name,
