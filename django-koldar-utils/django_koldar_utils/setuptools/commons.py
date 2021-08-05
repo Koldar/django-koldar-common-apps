@@ -29,11 +29,6 @@ class PushTagCommand(Command):
         print(f"Considering git repo {p}")
         repo = Repo(p, search_parent_directories=True)
 
-        # check if the repo is clean
-        if repo.is_dirty(untracked_files=True):
-            raise ValueError(
-                f"repository {repo} has some files to commit. Please commit them first or reset them. We are going to make a new remote tag, hence we need to be sure that the repo is clean!")
-
         version_file = AbstractHandleVersion.get_file_version()
         version = AbstractHandleVersion.read_version(version_file)
 
@@ -42,6 +37,15 @@ class PushTagCommand(Command):
         git.add(os.path.abspath(version_file))
         git.commit(m=f"Automatic commit required to go to version {version}")
         git.push()
+
+        # check if the repo is clean
+        if repo.is_dirty(untracked_files=True):
+            raise ValueError(f"""repository {repo} has some files to commit. 
+            Please commit them first or reset them. We are going to make a new remote tag, 
+            hence we need to be sure that the repo is clean! Files to commit are:
+            {repo.index}
+        """)
+
         # create and push the tag
         git.tag(f"v{version}", annotate=True, m=f"New release of the software to version {version}")
         git.push(tags=True)
