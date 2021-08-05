@@ -25,7 +25,9 @@ class PushTagCommand(Command):
 
     def run(self):
         from git import Repo
-        repo = Repo(".")
+        p = os.path.abspath(".")
+        print(f"Considering git repo {p}")
+        repo = Repo(p, search_parent_directories=True)
 
         # check if the repo is clean
         if repo.is_dirty(untracked_files=True):
@@ -143,6 +145,7 @@ class IncreaseMajorVersion(AbstractHandleVersion):
         self._write_version(version_file, next_version)
         print(f"done updating version file {version_file}")
         return str(next_version)
+
 
 class AbstractScriptSetup(abc.ABC):
 
