@@ -123,3 +123,40 @@ class ExtendedUserManager(IManager, UserManager):
 
     def _get(self, *args, **kwargs):
         return self.model_class._default_manager.get(*args, **kwargs)
+
+
+class AbstractOnlyActiveManager(models.Manager, abc.ABC):
+    """
+    A manager that consider only rows whose active field is True.
+    The name of the active field to consider is specified by active_field_name
+    """
+    @abc.abstractmethod
+    def active_field_name(self) -> str:
+        pass
+
+    def get_queryset(self):
+        return super().get_queryset().filter(**{self.active_field_name(): True})
+
+
+class StandardOnlyActiveManager(AbstractOnlyActiveManager):
+    """
+    A manager that consider only rows whose actve field is True.
+    The name of the field is hardcoded to be "active"
+    """
+
+    def active_field_name(self) -> str:
+        return "active"
+
+
+class StandardOnlyIsActiveManager(AbstractOnlyActiveManager):
+    """
+    A manager that consider only rows whose actve field is True.
+    The name of the field is hardcoded to be "is_active"
+    """
+
+    def active_field_name(self) -> str:
+        return "is_active"
+
+
+
+
