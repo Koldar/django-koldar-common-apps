@@ -4,16 +4,18 @@ from typing import List, Tuple, Dict, Any, Callable, Union, Optional
 import graphene
 import inflect as inflect
 import stringcase
-from graphene_django import DjangoObjectType
-from graphql_jwt.decorators import login_required
+import logging
 
-from django_koldar_utils.django import filters_helpers, django_helpers, permissions_helpers
+from django_koldar_utils.django import filters_helpers, django_helpers, permissions_helpers, auth_decorators
 from django_koldar_utils.graphql import graphql_decorators, error_codes
 from django_koldar_utils.graphql.GraphQLAppError import GraphQLAppError
 
 MUTATION_FIELD_DESCRIPTION = "Mutation return value. Do not explicitly use it."
 """
 A prefix to put to every mutation return value"""
+
+
+LOG = logging.getLogger(__name__)
 
 
 class ICrudOperationNamer(abc.ABC):
@@ -445,7 +447,7 @@ class GraphQLHelper(object):
             arguments=arguments,
             output_name=stringcase.camelcase(query_class_name),
             return_type=return_type,
-            body=login_required(permissions_helpers.ensure_user_has_permissions(permissions_required)(body))
+            body=auth_decorators.ensure_login_required()(auth_decorators.ensure_user_has_permissions(permissions_required)(body))
         )
 
     @classmethod
@@ -459,7 +461,7 @@ class GraphQLHelper(object):
         :param arguments: list of arguments in input of the query. It is a dictioanry where the values are graphene
             types (e.g., graphene.String). If inputting a complex type, use graphene.Argument.
         :param output_name: name of the output variable in the graphQL language
-        :param return_type: return type (ObjectType) of the query
+        :param return_type: return type (ObjectType) of the . Do not add here a graphene.Field type!
         :param body: a callable specifiying the code of the query. The first is the query class isntance. Info provides graphql context. the rest are the query arguments. You need to return the query value
         """
 
@@ -475,10 +477,19 @@ class GraphQLHelper(object):
         #         # If `foo` or `bar` are declared in the GraphQL query they will be here, else None.
         #         return Question.objects.filter(foo=foo, bar=bar).first()
 
+        assert query_class_name is not None, "Query class name is None"
+        assert all(map(lambda x: x is not None, arguments.keys())), f"Some arguments of {query_class_name} are None"
+        assert output_name is not None, f"output of {query_class_name} is None"
+        assert return_type is not None, f"return type of {query_class_name} is None"
+        assert description is not None, f"description of {query_class_name} is None"
+        assert not isinstance(return_type, graphene.Field), f"return type {return_type} of {query_class_name} does not need to be a field, but a plain ObjectType!"
+
         def perform_query(root, info, *args, **kwargs) -> any:
             if root is None:
                 root = query_class
             result = body(root, info, *args, **kwargs)
+            if not isinstance(result, return_type):
+                LOG.warning(f"Expected body of query {query_class_name} to return {return_type.__name__}, but instead it returned {type(result).__name__}")
             return result
 
         query_class = type(
@@ -515,6 +526,8 @@ class GraphQLHelper(object):
         filterset_name = filterset_type.__name__
         if filterset_name.endswith("Filter"):
             filterset_name = filterset_name[:-len("Filter")]
+        if token_name is None:
+            token_name = "token"
         django_type_str = stringcase.pascalcase(django_type.__name__)
         filterset_type_str = stringcase.camelcase(filterset_name)
         if query_class_name is None:
@@ -573,8 +586,8 @@ class GraphQLHelper(object):
         if permissions_required is not None:
             # add token and authentication decorators
             arguments[token_name] = cls.argument_jwt_token()
-            body = login_required(body)
-            body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.ensure_login_required()(body)
+            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
 
         result = cls.create_query(
             query_class_name=query_class_name,
@@ -601,6 +614,13 @@ class GraphQLHelper(object):
             - other parmaeters should be put in **args, **kwargs;
         """
 
+        assert mutation_class_name is not None, "mutation class name is none"
+        assert all(map(lambda x: x is not None, arguments.keys())), f"argument of {mutation_class_name} are none"
+        assert return_type is not None, "return type is None. This should not be possible"
+        assert "mutate" not in return_type.keys(), f"mutate in return type of class {mutation_class_name}"
+        assert all(map(lambda x: x is not None, return_type.keys())), f"some return value of {mutation_class_name} are None"
+        assert description is not None, f"description of {mutation_class_name} is None"
+
         mutation_class_meta = type(
             "Arguments",
             (object, ),
@@ -612,6 +632,8 @@ class GraphQLHelper(object):
                 root = mutation_class
             return body(root, info, *args, **kwargs)
 
+        LOG.info(f"Argument are {arguments}")
+        LOG.info(f"Creating mutation={mutation_class_name}; metaclass={mutation_class_meta.__name__}; arguments keys={',' .join(arguments.keys())}; return={', '.join(return_type.keys())}")
         mutation_class = type(
             mutation_class_name,
             (graphene.Mutation, ),
@@ -668,7 +690,7 @@ class GraphQLHelper(object):
                 "Arguments": mutation_class_meta,
                 "__doc__": description,
                 **return_type,
-                "mutate": login_required(permissions_helpers.ensure_user_has_permissions(required_permissions)(mutate))
+                "mutate": auth_decorators.ensure_login_required()(auth_decorators.ensure_user_has_permissions(required_permissions)(mutate))
             }
         )
         # Apply decorator to auto detect mutations
@@ -748,8 +770,8 @@ class GraphQLHelper(object):
         arguments[input_name] = cls.argument_required_input(django_input_type, description="The object to add into the database. id should not be populated. ")
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = login_required(body)
-            body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.ensure_login_required()(body)
+            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=str(mutation_class_name),
@@ -790,6 +812,8 @@ class GraphQLHelper(object):
         """
 
         primary_key_name = django_helpers.get_name_of_primary_key(django_type)
+        if token_name is None:
+            token_name = "token"
         if mutation_class_name is None:
             mutation_class_name = f"UpdatePrimitive{django_type.__name__}",
         if description is None:
@@ -838,8 +862,8 @@ class GraphQLHelper(object):
                                                                description="The object that will update the one present in the database.")
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = login_required(body)
-            body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.ensure_login_required()(body)
+            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=str(mutation_class_name),
@@ -884,6 +908,8 @@ class GraphQLHelper(object):
         """
 
         primary_key_name = django_helpers.get_name_of_primary_key(django_type)
+        if token_name is None:
+            token_name = "token"
         if mutation_class_name is None:
             mutation_class_name = f"Delete{django_type.__name__}"
         if hasattr(mutation_class_name, "__call__"):
@@ -923,8 +949,8 @@ class GraphQLHelper(object):
         arguments[input_name] = cls.argument_required_id_list(django_type.__name__)
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = login_required(body)
-            body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.ensure_login_required()(body)
+            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=mutation_class_name,
@@ -995,6 +1021,8 @@ class GraphQLHelper(object):
             input_name = p.plural(stringcase.camelcase(django_type.__name__))
         if output_name is None:
             output_name = "removed"
+        if token_name is None:
+            token_name = "token"
 
         def body(mutation_class, info, *args, **kwargs) -> any:
             id_list: List[int] = kwargs[input_name]
@@ -1013,8 +1041,8 @@ class GraphQLHelper(object):
         arguments[input_name] = cls.argument_required_id_list(django_type.__name__)
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
-            body = login_required(body)
-            body = permissions_helpers.ensure_user_has_permissions(permissions_required)(body)
+            body = auth_decorators.ensure_login_required()(body)
+            body = auth_decorators.ensure_user_has_permissions(permissions_required)(body)
 
         return cls.create_mutation(
             mutation_class_name=mutation_class_name,

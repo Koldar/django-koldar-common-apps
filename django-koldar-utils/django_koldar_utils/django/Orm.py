@@ -712,7 +712,7 @@ class Orm:
         )
 
     @classmethod
-    def required_external_id(cls, column_name: str = None, description: str = None) -> models.BigIntegerField:
+    def required_external_id(cls, column_name: str = None, description: str = None, db_index: bool = False) -> models.BigIntegerField:
         """
         Represents an id that represents an object external from this database.
         For instance, if the users are stored in another database but you want to referecen a user from this local
@@ -720,6 +720,7 @@ class Orm:
 
         :param column_name: name of the column to create
         :param description: help text of the column
+        :param db_index: if true, we will create an index for the table
         """
         return Orm.generic_field(
             field_type=models.BigIntegerField,
@@ -727,7 +728,7 @@ class Orm:
             blank=False,
             choices=None,
             db_column=column_name,
-            db_index=False,
+            db_index=db_index,
             default=None,
             error_messages=None,
             help_text=description,
