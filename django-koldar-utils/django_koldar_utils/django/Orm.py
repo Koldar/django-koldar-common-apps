@@ -209,69 +209,223 @@ class Orm:
         )
 
     @classmethod
-    def relationship_many_to_many(cls, from_model: Union[str, type], to_model: Union[str, type],
-                                         relationship_model: Union[str, type], related_name: str, help_text: str = None) -> models.ManyToManyField:
+    def relationship_many_to_many_with_intermediary_main_endpoint(cls, from_main_model: Union[str, type], to_secondary_model: Union[str, type],
+                                         relationship_model: Union[str, type], related_name: str, help_text: str = None, through_fields: List[str] = None) -> models.ManyToManyField:
         """
-        one author has many publications and each publication is made by many authros.
-        This should be put in the "author". The model output name should be something repersenting the other end of the
-        relationship itself (without considering the through model), so something like "authors".
-        The related_name should have the same name as the resulting value of "relationship_many_to_many_inverse".
-        :param from_model: author
-        :param to_model: publication
+        Used to define a N-N relationship that is using an intermediary model.
+        Represents the manager that is used to fetch the "through" model.
+
+        One author has many publications and each publication is made by many authors. Relationship is declared via an
+        intermediary model called e.g., AuthorWritePublication.
+
+        When modelling data in this manner, one endpoint needs to have this method. Usually you should choose the entity
+        that is "on top/contains" to the other. In the author example, it is the author that **writes** a publication while the publication
+        is more or less dependent w.r.t. the author. The author has an active role in the relation while the publication more of a passive role.
+        Hence this method should be placed in author.
+
+        The model field that stores the return value of this function should be something representing the other end of the
+        relationship itself (**without considering the through model**) in a plural form (since this is a N-N relationship):
+        in the example it should be something like "publications": you can then use "maria.publications.all()" to fetch all the publications
+        she has written.
+
+        If you want to retrieve "AuthorWritePublication" rather than "Publication", you should use the related_name
+        you have chosen in "AuthorWritePublication.author" instead
+
+        The related_name should have the same name as the resulting value of "relationship_many_to_many_with_intermediary_secondary_endpoint":
+        basically, To work, "Author.writes.related_name" field needs to be the same of Publication return
+        value of "relationship_many_to_many_with_intermediary_secondary_endpoint"
+
+        .. ::code-block:: python
+            class Author(models.Model):
+                writes = Orm.relationship_many_to_many_with_intermediary_main_endpoint(
+                    from_main_model="app.Author", to_secondary_model="app.Publication", relationship_model="app.AuthorWritePublication",
+                    related_name="written_by"
+                )
+
+            class Publication(models.Model):
+                written_by = Orm.relationship_many_to_many_with_intermediary_secondary_endpoint(
+                    from_main_model="app.Author", to_secondary_model="app.Publication", relationship_model="app.AuthorWritePublication",
+                )
+
+            class AuthorWritePublication(models.Model):
+                author = Orm.relationship_many_to_many_with_intermediary_reference_in_through(
+                    to_model="app.Author",
+                    on_delete=models.CASCADE,
+                    related_name="writes_through_model")
+                publication = Orm.relationship_many_to_many_with_intermediary_reference_in_through(
+                    to_model="app.Publication",
+                    on_delete=models.CASCADE,
+                    related_name="written_by_through_model"
+                )
+
+        :param from_main_model: the active model: author. It is the one that "owns" the relationship.
+            Should be representing this class.
+        :param to_secondary_model: the passive model: publication
         :param help_text: help text
+        :param through_fields: if the through model contains multiple foreign key to the same endpoint
+            (e.g., author_chair_in_peer_review may be an addiotional foreign key of type Author in AuthorWritePublication),
+            you need to specify here the names of the foreign key you want to use for vuilding the N-N relations. In the example,
+            it is likely to be set to ["author", "publication"] which are the foreign key used in the relationship.
+        :see https://docs.djangoproject.com/en/3.2/topics/db/models/#intermediary-manytomany:
+        :see https://docs.djangoproject.com/en/3.2/topics/db/models/#many-to-many-relationships:
         :return:
         """
+
         return models.ManyToManyField(
-            from_model,
+            to_secondary_model,
             help_text=help_text,
             through=relationship_model,
             related_name=related_name
         )
 
     @classmethod
-    def relationship_many_to_many_in_through_inverse(cls, from_model: Union[str, type], to_model: Union[str, type],
-                                          relationship_model: Union[str, type]) -> models.Manager:
+    def relationship_many_to_many_with_intermediary_secondary_endpoint(cls, from_main_model: Union[str, type], to_secondary_model: Union[str, type],
+                                          relationship_model: Union[str, type], through_fields: List[str] = None) -> models.Manager:
         """
-        Represents the manager that is used to fetch the "through" model. Needs to be put at both ends of the
-        N-N relationship.
+        Used to define a N-N relationship that is using an intermediary model.
+        Represents the manager that is used to fetch the "through" model.
 
-        The output name should be the same as the "related_name" in the "through" model of the method
-        "relationship_many_to_many_in_through".
+        One author has many publications and each publication is made by many authors. Relationship is declared via an
+        intermediary model called e.g., AuthorWritePublication.
 
-        :param from_model: model where the relationship starts
-        :param to_model: model where the relaionship ends
+        When modelling data in this manner, all except one of the endpoints need to have this method
+        (the main one should have relationship_many_to_many_with_intermediary_main_endpoint).
+        Usually you should choose the entity that is "on bottom/dependent" to the main one. In the author example,
+        it is the author that **writes** a publication while the publication
+        is more or less dependent w.r.t. the author. The author has an active role in the relation while the publication more of a passive role.
+        Hence this method should be placed in publication.
+
+        The model field that stores the return value of this function should be the same as the "related_name" in the
+        "relationship_many_to_many_with_intermediary_main_endpoint" function of the main relationship model
+        (in this case Author).
+
+        .. ::code-block:: python
+            class Author(models.Model):
+                writes = Orm.relationship_many_to_many_with_intermediary_main_endpoint(
+                    from_main_model="app.Author", to_secondary_model="app.Publication", relationship_model="app.AuthorWritePublication",
+                    related_name="written_by"
+                )
+
+            class Publication(models.Model):
+                written_by = Orm.relationship_many_to_many_with_intermediary_secondary_endpoint(
+                    from_main_model="app.Author", to_secondary_model="app.Publication", relationship_model="app.AuthorWritePublication",
+                )
+
+            class AuthorWritePublication(models.Model):
+                author = Orm.relationship_many_to_many_with_intermediary_reference_in_through(
+                    to_model="app.Author",
+                    on_delete=models.CASCADE,
+                    related_name="writes_through_model")
+                publication = Orm.relationship_many_to_many_with_intermediary_reference_in_through(
+                    to_model="app.Publication",
+                    on_delete=models.CASCADE,
+                    related_name="written_by_through_model"
+                )
+
+        :param from_main_model: model where the relationship starts. It is the one that "owns" the relationship
+        :param to_secondary_model: model where the relaionship ends
         :param relationship_model: model of the through relationship
+        :param through_fields: if the through model contains multiple foreign key to the same endpoint
+            (e.g., author_chair_in_peer_review may be an addiotional foreign key of type Author in AuthorWritePublication),
+            you need to specify here the names of the foreign key you want to use for vuilding the N-N relations. In the example,
+            it is likely to be set to ["author", "publication"] which are the foreign key used in the relationship.
         :see https://gist.github.com/jacobian/827937#file-models-py:
         """
         pass
 
     @classmethod
-    def relationship_many_to_many_inverse(cls, from_model: Union[str, type], to_model: Union[str, type],
-                                          relationship_model: Union[str, type]) -> models.Manager:
+    def relationship_many_to_many_with_intermediary_reference_in_through(cls, to_model: Union[str, type], on_delete,
+                                                                         related_name: str) -> models.ForeignKey:
         """
-        one author has many publications and each publication is made by many authros.
-        This should be put in the "publications". The result value should be somethign repersenting
-        the relationship, like "written_by"
-        :param from_model: author
-        :param to_model: publication
-        :param help_text: help text
-        :return:
-        """
-        pass
+        Used to define a N-N relationship that is using an intermediary model.
+        Represents a field that is used in the intermediary table that actually represent the relation.
 
-    @classmethod
-    def relationship_many_to_many_in_through(cls, to_model: Union[str, type], on_delete, related_name: str) -> models.ForeignKey:
-        """
-        one author has many publications and each publication is made by many authros.
-        This should be put in the model represneting hte relationship itself. For example:
-            publication = relationship_many_to_many_though(Publication, models.CASCADE)
-            author = relationship_many_to_many_though(Author, models.CASCADE)
-        :param to_model: publication
+        One author has many publications and each publication is made by many authors. Relationship is declared via an
+        intermediary model called e.g., AuthorWritePublication.
+
+        When modelling data in this manner, the intermediary table has one column per entity involved in the
+        relationship (in this case 2). This function needs to be called in AuthorWritePublication.
+
+        The model field that stores the return value of this function should have a name of your choosing.
+        Generally, you should choose a name representing the associated entity (e.g., for the author that has written
+        a publication, it may be "author").
+        The "related_name" you input here is **important**, since it is the name that you will used
+        in the reference model to gain access to the list of intermediate models owned. For example, given an "author"
+        if you want to fetch her associated AuthorWritePublication and if you have set "related_name" of "author" field
+        in AuthorWritePublication to "has_written", you need to call "maria_user.has_written.all(). Generally,
+        you should choose a name that represents the relationship entity (or the through model).
+        In this case for publication it might be "written_by" and for author "involved_in_writing".
+        If you want to retrieve the list of publications instead without dealing AuthorWritePublication, you should use
+        use the fields storing the retuirn value of either "relationship_many_to_many_with_intermediary_main_endpoint"
+        or "relationship_many_to_many_with_intermediary_secondary_endpoint".
+
+        In the example, the AuthorWritePublication should have 2 fields storing the output of this function:
+            publication = relationship_many_to_many_with_intermediary_reference_in_through("app.Publication", models.CASCADE, related_name="written_by")
+            author = relationship_many_to_many_with_intermediary_reference_in_through("app.Author", models.CASCADE, related_name="writes")
+
+        .. ::code-block:: python
+            class Author(models.Model):
+                writes = Orm.relationship_many_to_many_with_intermediary_main_endpoint(
+                    from_main_model="app.Author", to_secondary_model="app.Publication", relationship_model="app.AuthorWritePublication",
+                    related_name="written_by"
+                )
+
+            class Publication(models.Model):
+                written_by = Orm.relationship_many_to_many_with_intermediary_secondary_endpoint(
+                    from_main_model="app.Author", to_secondary_model="app.Publication", relationship_model="app.AuthorWritePublication",
+                )
+
+            class AuthorWritePublication(models.Model):
+                author = Orm.relationship_many_to_many_with_intermediary_reference_in_through(
+                    to_model="app.Author",
+                    on_delete=models.CASCADE,
+                    related_name="writes_through_model")
+                publication = Orm.relationship_many_to_many_with_intermediary_reference_in_through(
+                    to_model="app.Publication",
+                    on_delete=models.CASCADE,
+                    related_name="written_by_through_model"
+                )
+
+        :param to_model: model that is referenced by this field publication
         :param on_delete: what to do whenever a delete is performed
         :param related_name: inverse relation from "to_model" to gain access to this relationship
         :return:
         """
         return models.ForeignKey(to_model, on_delete=on_delete, related_name=related_name)
+
+    # @classmethod
+    # def relationship_many_to_many(cls, from_model: Union[str, type], to_model: Union[str, type],
+    #                                      relationship_model: Union[str, type], related_name: str, help_text: str = None) -> models.ManyToManyField:
+    #     """
+    #     one author has many publications and each publication is made by many authros.
+    #     This should be put in the "author". The model output name should be something repersenting the other end of the
+    #     relationship itself (without considering the through model), so something like "authors".
+    #     The related_name should have the same name as the resulting value of "relationship_many_to_many_inverse".
+    #     :param from_model: author
+    #     :param to_model: publication
+    #     :param help_text: help text
+    #     :return:
+    #     """
+    #     return models.ManyToManyField(
+    #         from_model,
+    #         help_text=help_text,
+    #         through=relationship_model,
+    #         related_name=related_name
+    #     )
+    #
+    # @classmethod
+    # def relationship_many_to_many_inverse(cls, from_model: Union[str, type], to_model: Union[str, type],
+    #                                       relationship_model: Union[str, type]) -> models.Manager:
+    #     """
+    #     one author has many publications and each publication is made by many authros.
+    #     This should be put in the "publications". The result value should be somethign repersenting
+    #     the relationship, like "written_by"
+    #     :param from_model: author
+    #     :param to_model: publication
+    #     :param help_text: help text
+    #     :return:
+    #     """
+    #     pass
 
     @classmethod
     def relationship_many_to_many_simple(cls, from_model: Union[str, type], to_model: Union[str, type],
