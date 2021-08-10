@@ -7,13 +7,14 @@ from django_koldar_utils.django.fields.ArrowField import ArrowField
 
 class ArrowAuditMixIn(models.Model):
     """
-    A mixin that allows you to automatically add the user that has created or updated a particular model
+    A mixin that allows you to automatically add the user that has created, delete or updated a particular model.
+    We use "arrow" to convert models
     """
     class Meta:
         abstract = True
 
-    created_at = ArrowField(auto_now_add=True)
-    updated_at = ArrowField(auto_now=True)
-    active = models.BooleanField()
-    created_by = CurrentUserField(related_name=Orm.DO_NOT_CREATE_INVERSE_RELATION)
-    updated_by = CurrentUserField(related_name=Orm.DO_NOT_CREATE_INVERSE_RELATION, on_update=True)
+    created_at = ArrowField(auto_now_add=True, help_text="Time when the row has been created")
+    updated_at = ArrowField(auto_now=True, help_text="Latest time when the row has been updated")
+    active = models.BooleanField(default=True, help_text="If set, the row should be included in whatever queryset generated")
+    created_by = CurrentUserField(related_name=Orm.DO_NOT_CREATE_INVERSE_RELATION, help_text="User that has created this row")
+    updated_by = CurrentUserField(related_name=Orm.DO_NOT_CREATE_INVERSE_RELATION, on_update=True, help_text="User that has performed the last operation on this row")
