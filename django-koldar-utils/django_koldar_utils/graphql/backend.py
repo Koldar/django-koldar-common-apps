@@ -9,7 +9,7 @@ class GeneralServiceBackend(AbstractDjangoBackend):
     """
 
     def authenticate(self, request, access_token: str, **kwargs) -> Optional[TUSER]:
-
+        pass
 
     def get_user(self, user_id: TUSER_ID) -> Optional[TUSER]:
         pass
