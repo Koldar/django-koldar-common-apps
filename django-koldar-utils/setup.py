@@ -36,6 +36,7 @@ s = library_setup.LibraryScriptSetup(
         "requests>=2.25.1",
         "stringcase>=1.2.0",
         "urllib3>=1.26.5",
+        "jmespath>=0.10.0",
     ]
 )
 

@@ -34,6 +34,17 @@ DJANGO_APP_GRAPHQL = {
 
 and select either *ariadne* or *graphene*.
 
+Finally, in `urls.py` of the entire project add the following line:
+
+```
+urlpatterns = [
+    ...
+    path("graphqls/", include("django_app_graphql.urls")),
+    ...
+]
+```
+
+
 ## You have chosen graphene
 
 The app needs to be deploy for last because otherwise it cannot detect all the Django models and their types.
