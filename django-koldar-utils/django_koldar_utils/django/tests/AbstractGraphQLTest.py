@@ -1,7 +1,9 @@
 import abc
 import json
+import operator
 import re
-from typing import Dict, Tuple, Callable, Union
+import sys
+from typing import Dict, Tuple, Callable, Union, List
 
 import jmespath
 from django.core.handlers.wsgi import WSGIRequest
@@ -48,6 +50,15 @@ class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
     """
     A class allowing you to tst graphql queries
     """
+
+    @abc.abstractmethod
+    def perform_authentication(self, **kwargs) -> any:
+        """
+        A method that is used in the tests to perform authentication of a client. Returns whatever you want.
+        Requires you to input something that resembles credentials (e.g., username and password). We never call it,
+        it's a convenience methdo for you,. If you don't plan tyo use authentication in your tests, set it to whateve you want
+        """
+        pass
 
     def perform_graphql_query(self, graphql_query_info: Union[GraphQLRequestInfo, str]) -> GraphQLResponseInfo:
         """
@@ -99,7 +110,32 @@ class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
         :param graphql_response: object genrated by perform_graphql_query
         :raise AssertionError: if the check fails
         """
-        super().assertResponseNoErrors(graphql_response.response, f"graphql {graphql_response.request} did not return successfully!")
+        try:
+            errors = list(map(lambda error: error["message"], graphql_response.content["errors"]))
+        except Exception:
+            errors = ["Could not analyze graphql error section. Please try to directly invoke the request"]
+
+        errors = '\n'.join(errors)
+        self.assertEqual(graphql_response.response.status_code, 200, f"""The graphql query HTTP status is not 200! Errors were:\n{errors}""")
+        self.assertNotIn("errors", list(graphql_response.content.keys()), graphql_response.content)
+
+    def assert_graphql_response_error(self, graphql_response: GraphQLResponseInfo, expected_error_substring: str):
+        """
+        Ensure that the error section of graphql has at least one error whose string contains the given substring
+
+        :param graphql_response: reponse to inspect
+        :param expected_error_substring: subsrting of the error to consider
+        """
+        def check(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
+            if "errors" not in aresponse.content:
+                return False, "response was successful, but we expected to have errors"
+
+            for error_data in aresponse.content["errors"]:
+                if expected_error_substring in str(error_data["message"]):
+                    return True, ""
+            return False, f"no errors were found s.t. contains substring \"{expected_error_substring}\".\nErrors were: {aresponse.content['errors']}"
+
+        self.assert_graphql_response_satisfy(graphql_response, constraint=check, check_success=False)
 
     def assert_json_path_satisfies(self, graphql_response: GraphQLResponseInfo, criterion: GraphQLAssertionConstraint):
         """
@@ -228,6 +264,7 @@ class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
                     maximum_length -= 1
                 if actual_length > maximum_length:
                     return False, f"in path {path}: expected string needed to be at most {maximum_length} long (included), but it was {actual_length}"
+            return True, ""
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
@@ -235,6 +272,13 @@ class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = str(jmespath.search(path, aresponse.content))
             return str(expected_substring) in actual, f"in path {path}: expected in actual failed: {expected_substring} not in {actual}"
+
+        self.assert_json_path_satisfies(graphql_response, criterion)
+
+    def assert_json_path_str_does_not_contain_substring(self, graphql_response: GraphQLResponseInfo, path: str, expected_substring: str):
+        def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
+            actual = str(jmespath.search(path, aresponse.content))
+            return str(expected_substring) not in actual, f"in path {path}: expected is indeed in actual, but we needed not to: {expected_substring} not in {actual}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
@@ -253,3 +297,238 @@ class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
             return m is not None, f"in path {path} string {actual} does not even partially satisfy the regex {expected_regex}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
+
+    def assert_json_path_obj_dynamic_method(self, graphql_response: GraphQLResponseInfo, path: str, method_name: str, args: List[any], kwargs: Dict[str, any], expected_result: any, comparison_function: Callable[[any, any], any] = None):
+        """
+        Use this assertion to test the output of a instance method of the return value generated by jmespath path.
+
+        .. ::code-block::
+            assert_json_path_obj_dynamic_method(response, "foo.bar", "__len__", [], {}, 5)
+
+        In the previous method, we expect the item to be an object tha thas the instance method "__len__", with not further arguments.
+        We expect the method to generate the value of 5
+
+        :param graphql_response: the response to check
+        :param path: path to check
+        :param method_name: name of the instance method of the value geneated by the json path to consider
+        :param args: args of the methd to invoke
+        :param kwargs: kwargs of the method to invoke
+        :param expected_result: the result we hope to have
+        :param comparison_function: a function that is used to compare the result of the method name (first argument) with the expected result (second argument). If left missing, it is the "operator.eq" between the actual and the expected
+        """
+        def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
+            # actual may be a list, str, int
+            actual = jmespath.search(path, aresponse.content)
+            if actual is None:
+                return False, f"in path {path}: expected object {expected_result}, but the path pointed to a None value"
+            if not hasattr(actual, method_name):
+                return False, f"in path {path}: The object pointed by the path is of type {type(actual)}, which does not have a method called {method_name}"
+            actual_method = getattr(actual, method_name)
+            actual_result = actual_method(actual, *args, **kwargs)
+            args_str = ', '.join(args)
+            kwargs_str = ', '.join(map(lambda i: f"{i[0]}={i[1]}", kwargs.items()))
+
+            nonlocal comparison_function
+            if comparison_function is None:
+                comparison_function = operator.eq
+            return comparison_function(actual_result, expected_result), f"in path {path}: the <{type(actual)}>.{method_name}({args_str}, {kwargs_str}) yielded {actual_result}; however, we expected to be {expected_result}"
+
+        self.assert_json_path_satisfies(graphql_response, criterion)
+
+    def assert_json_path_to_be_of_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
+        """
+        Assert an array ot be of a determinated length length
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=expected_result,
+        )
+
+    def assert_json_path_to_be_gt_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
+        """
+        Assert an array ot be of at least a (non included) determinated length length
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=expected_result,
+            comparison_function=operator.gt
+        )
+
+    def assert_json_path_to_be_geq_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
+        """
+        Assert an array of the actual result to be of at least an included determinated length length
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=expected_result,
+            comparison_function=operator.ge
+        )
+
+    def assert_json_path_to_be_lt_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
+        """
+        Assert an array ot be of at most a (non included) determinated length length
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=expected_result,
+            comparison_function=operator.lt
+        )
+
+    def assert_json_path_to_be_leq_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
+        """
+        Assert an array of the actual result to be of at most an included determinated length length
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=expected_result,
+            comparison_function=operator.le
+        )
+
+    def assert_json_path_to_be_ne_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
+        """
+        Assert an array of the actual result not to be of a determinated length length
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=expected_result,
+            comparison_function=operator.ne
+        )
+
+    def assert_json_path_to_be_gt_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
+        """
+        Assert an array ot be of at least a (non included) determinated length length
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=expected_result,
+            comparison_function=operator.gt
+        )
+
+    def assert_json_path_to_be_nonzero_length(self, graphql_response: GraphQLResponseInfo, path: str):
+        """
+        Assert an array to have at least one element
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=0,
+            comparison_function=operator.gt
+        )
+
+    def assert_json_path_to_be_zero_length(self, graphql_response: GraphQLResponseInfo, path: str):
+        """
+        Assert an array to be empty
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param expected_result: result of the length comparison
+        """
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=0,
+            comparison_function=operator.eq
+        )
+
+    def assert_json_path_to_be_in_range(self, graphql_response: GraphQLResponseInfo, path: str, lb, ub, lb_included: bool = True, ub_included: bool = False):
+        """
+        Assert an array of the actual result to be ioncluded in one of a range of type [a,b], [a,b[, ]a,b] or ]a,b[
+        If we consider floats, we consider the number plus/minus the epsilon
+
+        :param graphql_response: response top analyze
+        :param path: path to consider
+        :param lb: lowerbound fo the range
+        :param ub: upperbound of the range
+        :param lb_included: if true, the "lb" is included in the range (i.e., "[" bracket)
+        :param lb_included: if true, the "ub" is included in the range (i.e., "]" bracket)
+        """
+
+        def compare_range(x, tpl) -> bool:
+            (alb, aub, alb_included, aub_included) = tpl
+            if isinstance(alb, float):
+                y = sys.float_info.epsilon
+            else:
+                y = 1
+
+            if not alb_included:
+                alb = alb + y
+            if not aub_included:
+                aub = aub - y
+            return alb <= x <= aub
+
+        self.assert_json_path_obj_dynamic_method(
+            graphql_response=graphql_response,
+            path=path,
+            method_name="__len__",
+            args=[],
+            kwargs={},
+            expected_result=(lb, ub, lb_included, ub_included),
+            comparison_function=compare_range
+        )
+
