@@ -17,9 +17,10 @@ class AbstractGenericUser(AbstractBaseUser, ArrowAuditMixIn):
     class that we are going to use in this django project to store each user additional properties.
 
     Any derived class of this user needs to specify the permission mixin it wants to use.
-    There are 2 available:
+    There are some available:
 
-    - django django.contrib.auth.models.PermissionsMixin which assume 2 relationshi groups and permissions
+    - django django.contrib.auth.models.PermissionsMixin which assume 2 relationshi groups and permissions;
+    - PermissionWithoutPrimitivesMixin: adds groups and user_permissions fields, but you still need to add "superuser" and "active" fields
     - DatabaselessPermissionsMixin django_koldar_utils.django.models.DatabaselessPermissionsMixin which does not
 
     To chose, implement the class as follows:
