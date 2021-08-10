@@ -155,7 +155,7 @@ class AbstractScriptSetup(abc.ABC):
 
     def __init__(self, author: str, author_mail: str, description: str, keywords: List[str], home_page: str,
                       python_minimum_version: str, license_name: str, main_package: str, classifiers: List[str] = None,
-                      package_data: str = "package_data", required_dependencies: List[str] = None):
+                      package_data: str = "package_data", required_dependencies: List[str] = None, scripts: List[str] = None):
         self.author = author
         self.author_mail = author_mail
         self.description = description
@@ -167,6 +167,7 @@ class AbstractScriptSetup(abc.ABC):
         self.required_dependencies = required_dependencies
         self.main_package = main_package
         self.package_data = package_data
+        self.scripts = scripts
 
     def get_name(self) -> str:
         return stringcase.spinalcase(self.main_package)
@@ -191,8 +192,10 @@ class AbstractScriptSetup(abc.ABC):
             return self.classifiers
 
     def get_license_classifier_name(self) -> str:
-        if self.license_name == "MIT":
+        if self.license_name.lower() == "mit":
             return f"License :: OSI Approved :: MIT License"
+        elif self.license_name.lower() in ["proprietary", "commercial", "close"]:
+            return f"Other/Proprietary License"
         else:
             raise ValueError(f"Cannot determine license classifiier name of license {self.license_name}")
 
@@ -231,6 +234,9 @@ class AbstractScriptSetup(abc.ABC):
                     dep_version = dep.split("==")[1].strip()
                     yield dep_name + ">=" + dep_version
 
+    def get_scripts(self) -> List[str]:
+        return self.scripts or []
+
     def perform_setup(self, **kwargs):
         cmdclass = {
             'update_version_patch': IncreasePatchVersion,
@@ -256,7 +262,7 @@ class AbstractScriptSetup(abc.ABC):
             packages=find_packages(),
             long_description=self.read_file_content('README.md'),
             long_description_content_type="text/markdown",
-            classifiers=self.classifiers,
+            classifiers=self.get_classifiers(),
             license_files="LICEN[SC]E*.md",
             # REQUIREMENTS
             python_requires=self.get_python_requires(),
@@ -264,6 +270,8 @@ class AbstractScriptSetup(abc.ABC):
             # NON PYTHON DATA
             include_package_data=True,
             package_data=self.get_package_data(),
+            # SCRIPTS TO INSTALL IN PYTHON "Script" folder
+            scripts=self.get_scripts(),
             # CONSOLE SCRIPT
             #entry_points={"console_scripts": [f"{console_script_name}={main_package}.main:main"]},
             # TEST
