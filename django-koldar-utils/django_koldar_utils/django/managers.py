@@ -108,21 +108,41 @@ class ExtendedPolymorphicManager(IManager, PolymorphicManager):
 #todo readd Generic[TMODEL],
 class ExtendedManager(IManager, models.Manager):
     """
-    A manager which provides common utilities
+    A manager which provides common utilities.
+    If you use this manager, we automatically filter out inactive entries.
+    Inactive entries are detected via the field name "active_field_name"
     """
 
+    def active_field_name(self) -> str:
+        return "active"
+
+    def get_queryset(self):
+        return super().get_queryset().filter(**{self.active_field_name(): True})
+
     def _get(self, *args, **kwargs):
-        return self.model_class._default_manager.get(*args, **kwargs)
+        kwargs = dict(kwargs)
+        kwargs[self.active_field_name()] = True
+        return super().get_queryset().get(*args, **kwargs)
 
 
 #todo readd Generic[TMODEL],
 class ExtendedUserManager(IManager, UserManager):
     """
-    Extension of the UserManager implementation
+    Extension of the UserManager implementation.
+    If you use this manager, we automatically filter out inactive entries.
+    Inactive entries are detected via the field name "active_field_name"
     """
 
+    def active_field_name(self) -> str:
+        return "active"
+
+    def get_queryset(self):
+        return super().get_queryset().filter(**{self.active_field_name(): True})
+
     def _get(self, *args, **kwargs):
-        return self.model_class._default_manager.get(*args, **kwargs)
+        kwargs = dict(kwargs)
+        kwargs[self.active_field_name()] = True
+        return super().get_queryset().get(*args, **kwargs)
 
 
 class AbstractOnlyActiveManager(models.Manager, abc.ABC):
