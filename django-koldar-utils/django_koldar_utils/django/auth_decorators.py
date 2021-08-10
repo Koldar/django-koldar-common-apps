@@ -28,6 +28,16 @@ def permissions_denied_standard(user, request, missing_permissions=None, *args, 
         f"The user {user} do not have the required permissions {', '.join(missing_permissions)} for accessing the function.")
 
 
+def permission_name_fetcher_standard(permission: Permission) -> str:
+    """
+    Convert a Permission object into a string that can be used by user.has_perm
+
+    :param permission: Permission instance
+    :return: something like 'auth_app.can_update_gdpr'
+    """
+    return f"{permission.content_type.app_label}.{permission.codename}"
+
+
 def graphql_ensure_login_required(get_user: Callable[[any, any, any, any], any] = None, exc: Callable[[any, any, any], Exception] = None):
     """
     Generates a decorator that checks if a user is authenticated. If it fails, it generates an exception.
@@ -62,7 +72,7 @@ def graphql_ensure_login_required(get_user: Callable[[any, any, any, any], any] 
     return decorator
 
 
-def graphql_ensure_user_has_permissions(perm: Union[List[str], str], get_user: Callable[[any, any, any], any] = None, exc: Callable[[any, any, any], Exception] = None, permission_denied_exc: Callable = None):
+def graphql_ensure_user_has_permissions(perm: Union[List[str], str], get_user: Callable[[any, any, any], any] = None, exc: Callable[[any, any, any], Exception] = None, permission_denied_exc: Callable = None, permission_name_fetcher: Callable[[any], any] = None):
     """
     A copy of permission_required where the error generates the missing permissions.
     We assume that the decorated function s a grpahene query/mutation body, thus it should follow the following prototype:
@@ -74,6 +84,8 @@ def graphql_ensure_user_has_permissions(perm: Union[List[str], str], get_user: C
     :param get_user: function that fetches the user from the request. If none, we will fetch it by using request.user
     :param exc: function that genrates the exception to raise in case of unsuccessful login.
     :param permission_denied_exc: a function that si called whenever the function detects that the user do not have enough permissions to perform the action
+    :param permission_name_fetcher: a function that convert a permission object into an object (usually a string) that is injected into User.has_perm function.
+            If None we will provide a sane default
     first parameter is the request, the second the function *arg and the third the function **kwargs
     """
 
@@ -83,6 +95,8 @@ def graphql_ensure_user_has_permissions(perm: Union[List[str], str], get_user: C
         exc = exception_callback
     if permission_denied_exc is None:
         permission_denied_exc = permissions_denied_standard
+    if permission_name_fetcher is None:
+        permission_name_fetcher = permission_name_fetcher_standard
 
     def decorator(f):
         @functools.wraps(f)
@@ -95,9 +109,18 @@ def graphql_ensure_user_has_permissions(perm: Union[List[str], str], get_user: C
                 perms = (perm,)
             else:
                 perms = perm
-            # convert permissions codename into Permission objects
-            perms = (Permission.objects.get(codename=p) for p in perms)
-            missing_permissions = list(filter(lambda p: not user.has_perm(p), perms))
+            # convert permissions codename into Permission objects. If some of them are not found,
+            # merge them with missing permissions
+            missing_permissions = []
+            tmp = []
+            for p in perms:
+                try:
+                    p = Permission.objects.get(codename=p)
+                    tmp.append(p)
+                except Permission.DoesNotExist:
+                    missing_permissions.append(p)
+            perms = tmp
+            missing_permissions.extend(list(filter(lambda p: not user.has_perm(p), map(permission_name_fetcher, perms))))
 
             if len(missing_permissions) > 0:
                 permission_denied_exc(user, info.context, missing_permissions, *args, **kwargs)
