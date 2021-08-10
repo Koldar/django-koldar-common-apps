@@ -1,5 +1,6 @@
 import enum
 import functools
+import logging
 from typing import Union, Tuple
 
 import stringcase
@@ -10,6 +11,9 @@ from graphql_jwt import decorators
 from graphql_jwt.exceptions import PermissionDenied
 
 from django_koldar_utils.django import django_helpers
+
+
+LOG = logging.getLogger(__name__)
 
 
 class PermissionClass(enum.Enum):
@@ -100,7 +104,7 @@ def create_permission_to_save(codename: str, model: type, name: str = None) -> P
     return permission
 
 
-def create_saved_crud_permissions(model: type, concept: str = None) -> Tuple[Permission, Permission, Permission, Permission]:
+def create_saved_crud_permissions(model: type, concept: str = None, generate_create: bool = True, generate_view: bool = True, generate_update: bool = True, generate_delete: bool = True) -> Tuple[Permission, Permission, Permission, Permission]:
     """
     Create the basic 4 crud permission given a a string.
     We will store such 4 permissions inside the databae immediately, so you don't need to asve them.
@@ -110,31 +114,62 @@ def create_saved_crud_permissions(model: type, concept: str = None) -> Tuple[Per
 
     :param model: a django model type models.Model
     :param concept: name fo the permission concept. If left missing, it is model
+    :param generate_create: if True, we will generate the create permission
+    :param generate_view: if True, we will generate the view permission
+    :param generate_update: if True, we will generate the update permission
+    :param generate_delete: if True, we will generate the delete permission
     :return: 4 permissions CRUD
     """
 
     if concept is None:
         concept = model.__name__
-    create = create_permission_to_save(
-        codename=f"can_create_{stringcase.snakecase(concept)}",
-        name=f"Can create {stringcase.sentencecase(concept)}",
-        model=model
-    ).save()
-    read = create_permission_to_save(
-        codename=f"can_view_{stringcase.snakecase(concept)}",
-        name=f"Can view {stringcase.sentencecase(concept)}",
-        model=model
-    ).save()
-    update = create_permission_to_save(
-        codename=f"can_update_{stringcase.snakecase(concept)}",
-        name=f"Can update {stringcase.sentencecase(concept)}",
-        model=model
-    ).save()
-    delete = create_permission_to_save(
-        codename=f"can_delete_{stringcase.snakecase(concept)}",
-        name=f"Can delete {stringcase.sentencecase(concept)}",
-        model=model
-    ).save()
+
+    generated = []
+
+    if generate_create:
+        create = create_permission_to_save(
+            codename=f"can_create_{stringcase.snakecase(concept)}",
+            name=f"Can create {stringcase.sentencecase(concept)}",
+            model=model
+        )
+        create.save()
+        generated.append(create)
+    else:
+        create = None
+
+    if generate_view:
+        read = create_permission_to_save(
+            codename=f"can_view_{stringcase.snakecase(concept)}",
+            name=f"Can view {stringcase.sentencecase(concept)}",
+            model=model
+        )
+        read.save()
+        generated.append(read)
+    else:
+        read = None
+
+    if generate_update:
+        update = create_permission_to_save(
+            codename=f"can_update_{stringcase.snakecase(concept)}",
+            name=f"Can update {stringcase.sentencecase(concept)}",
+            model=model
+        )
+        update.save()
+        generated.append(update)
+    else:
+         update = None
+
+    if generate_delete:
+        delete = create_permission_to_save(
+            codename=f"can_delete_{stringcase.snakecase(concept)}",
+            name=f"Can delete {stringcase.sentencecase(concept)}",
+            model=model
+        )
+        delete.save()
+        generated.append(delete)
+    else:
+        delete = None
+    LOG.info(f"""created the following permissions: {', '.join(map(lambda x: f"{x.codename} (id={x.id})", generated))}""")
     return create, read, update, delete
 
 
