@@ -54,8 +54,6 @@ def get_primary_key_value(model: models.Model) -> any:
     return getattr(model, name)
 
 
-
-
 def are_we_in_migration() -> bool:
     """
     Check if we a re runnign in a migration or not
@@ -76,6 +74,17 @@ def get_primitive_fields(django_type: type) -> Iterable[models.Field]:
     """
     for f in django_type._meta.get_fields():
         if not f.is_relation:
+            yield f
+
+
+def get_unique_field_names(django_type: type) -> Iterable[models.Field]:
+    """
+    Fetch an iterable of fields which are marked as unique in the associated django type
+
+    :param django_type: model to inspect
+    """
+    for f in django_type._meta.get_fields():
+        if not f.unique:
             yield f
 
 
