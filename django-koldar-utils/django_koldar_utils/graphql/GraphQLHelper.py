@@ -669,6 +669,8 @@ class GraphQLHelper(object):
         :return: class representing the mutation
         """
 
+        if token_name is None:
+            token_name = "token"
         mutation_class_meta = type(
             "Arguments",
             (object,),
@@ -1159,6 +1161,24 @@ class GraphQLHelper(object):
         if description is not None:
             desc += description
         return graphene.Argument(graphene.List(graphene.ID), required=True, description=desc)
+
+    @classmethod
+    def argument_required_string_list(cls, entity: Union[type, str] = None, description: str = None) -> graphene.Argument:
+        """
+        String list that can be used to represents some entities (e.g., codename of permissions). Used within Argument metaclass for mutations
+
+        :param entity: name of the class of the entity this id represents
+        :param description: description of the argument. it will be concatenated with the generated information
+        """
+        if entity is not None:
+            if isinstance(entity, type):
+                entity = entity.__name__
+            desc = f"srting identifiers each uniquely representing a {entity} within the system."
+        else:
+            desc = f"Unique identifier list each representing an entity."
+        if description is not None:
+            desc += description
+        return graphene.Argument(graphene.List(graphene.String), required=True, description=desc)
 
     @classmethod
     def argument_required_string(cls, description: str = None) -> graphene.String:
