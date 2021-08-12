@@ -488,8 +488,20 @@ class GraphQLHelper(object):
             if root is None:
                 root = query_class
             result = body(root, info, *args, **kwargs)
-            if not isinstance(result, return_type):
-                LOG.warning(f"Expected body of query {query_class_name} to return {return_type.__name__}, but instead it returned {type(result).__name__}")
+            # check output soundness. It is important because debuggin this type of error is quite difficult.
+            if isinstance(result, list):
+                if not isinstance(return_type, graphene.List):
+                    raise TypeError(f"Query generated a list ({result}), but the query expected to return a {return_type}")
+            else:
+                if isinstance(result, root):
+                    # the return value is the same as the root class. (e.g., CookiePolicy and CookiePolicy instance
+                    pass
+                elif not isinstance(result, return_type):
+                    # maybe the result is AuthUser and the return type is AuthUserGraphQLType
+                    # in case of CookiePolicy and String. The problem here is that return type is just a field of the return class
+                    # some "_meta" classes (e.g., ScalarOptions) do not have a "model" attribute, so we need to filter it
+                    if not isinstance(result, return_type._meta.model):
+                        raise TypeError(f"Expected body of query {query_class_name} to return either {return_type.__name__} or {return_type._meta.model.__name__}, but instead it returned {type(result).__name__}")
             return result
 
         query_class = type(
@@ -1186,6 +1198,16 @@ class GraphQLHelper(object):
         a reference of the value fo a field. Used within Argument metaclass for mutations
         """
         return graphene.String(required=True, description=description)
+
+    @classmethod
+    def argument_nullable_string(cls, description: str = None) -> graphene.String:
+        """
+        Used within Argument metaclass for mutations.
+        Tells you that the mutation requires to have a string argument which may be set to null
+
+        :param description: description of the argument.
+        """
+        return graphene.String(required=False, description=description)
 
     @classmethod
     def argument_required_input(cls, input_type: type, description: str = None) -> graphene.Argument:

@@ -1,13 +1,34 @@
 import abc
 import json
 import operator
+import os
 import re
 import sys
 from typing import Dict, Tuple, Callable, Union, List
 
 import jmespath
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.handlers.wsgi import WSGIRequest
-from graphene_django.utils.testing import GraphQLTestCase
+from graphene.test import Client
+from graphene_django.tests.test_utils import client_query
+from graphene_django.utils.testing import GraphQLTestCase, graphql_query
+from graphene_file_upload.django.testing import GraphQLFileUploadTestMixin, file_graphql_query
+
+
+class FileToUpload(object):
+    """
+    Declarative way of a file to upload
+    """
+
+    def __init__(self, filepath: str, file_variable_name: str, encoding: str = "utf8", name: str = None, content_type: str = None):
+        self.filepath = filepath
+        self.encoding = encoding
+        self.name = name or os.path.basename(self.filepath)
+        self.content_type = content_type or "text/plain"
+        self.file_variable_name = file_variable_name
+        """
+        the name of the graphql endpoint accepting this file 
+        """
 
 
 class GraphQLRequestInfo(object):
@@ -15,12 +36,13 @@ class GraphQLRequestInfo(object):
     A class that syntethzie the graphql call the developer wants to test
     """
 
-    def __init__(self, graphql_query: str, graphql_operation_name: str = None, input_data: Dict[str, any] = None, headers: Dict[str, any] = None, graphql_variables: Dict[str, any] = None):
+    def __init__(self, graphql_query: str, graphql_operation_name: str = None, input_data: Dict[str, any] = None, headers: Dict[str, any] = None, graphql_variables: Dict[str, any] = None, files: List[FileToUpload] = None):
         self.query = graphql_query
         self.operation_name = graphql_operation_name
         self.input_data = input_data
         self.graphql_variables = graphql_variables
         self.headers = headers
+        self.files = files
 
 
 class GraphQLResponseInfo(object):
@@ -46,10 +68,18 @@ A constraint of assert_graphql_response_satisfy
 """
 
 
-class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
+class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
     """
     A class allowing you to tst graphql queries
     """
+
+
+    def graphql_url(self) -> str:
+        """
+        Url of the graphql server to contact. Be **sure**
+        :return:
+        """
+        return "/graphql/"
 
     @abc.abstractmethod
     def perform_authentication(self, **kwargs) -> any:
@@ -60,9 +90,49 @@ class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
         """
         pass
 
+    def query(
+        self, query: str, operation_name: str=None, input_data=None, variables=None, headers=None
+    ):
+        """
+        Args:
+            query (string)    - GraphQL query to run
+            operation_name (string)  - If the query is a mutation or named query, you must
+                                supply the op_name.  For annon queries ("{ ... }"),
+                                should be None (default).
+            input_data (dict) - If provided, the $input variable in GraphQL will be set
+                                to this value. If both ``input_data`` and ``variables``,
+                                are provided, the ``input`` field in the ``variables``
+                                dict will be overwritten with this value.
+            variables (dict)  - If provided, the "variables" field in GraphQL will be
+                                set to this value.
+            headers (dict)    - If provided, the headers in POST request to GRAPHQL_URL
+                                will be set to this value.
+
+        Returns:
+            Response object from client
+        """
+        url = self.graphql_url()
+        if not url.startswith("/"):
+            url = "/" + url
+        if not url.endswith("/"):
+            url = url + "/"
+
+        return graphql_query(
+            query,
+            operation_name=operation_name,
+            input_data=input_data,
+            variables=variables,
+            headers=headers,
+            client=self.client,
+            graphql_url=url,
+        )
+
     def perform_graphql_query(self, graphql_query_info: Union[GraphQLRequestInfo, str]) -> GraphQLResponseInfo:
         """
-        Generally perform a query to the graphql endpoint
+        Generally perform a query to the graphql endpoint.
+
+        If the file variable is not None, we expect the graphql to have as many variables as there are files.
+        Each variable name **has to be** one specified by graphql_query_info.files.file_variable_name.
 
         :param graphql_query_info: either a full structure describing the request we want to make or a graphql query string (query nd mutation included)
         """
@@ -70,16 +140,60 @@ class AbstractGraphQLTest(GraphQLTestCase, abc.ABC):
             graphql_query_info = GraphQLRequestInfo(
                 graphql_query=graphql_query_info,
             )
-        response = self.query(
-            query=graphql_query_info.query,
-            operation_name=graphql_query_info.operation_name,
-            input_data=graphql_query_info.input_data,
-            variables=graphql_query_info.graphql_variables,
-            headers=graphql_query_info.headers,
-        )
+
+        if graphql_query_info.files is not None:
+            files = []
+            for file_to_upload in graphql_query_info.files:
+                with open(os.path.abspath(file_to_upload.filepath), mode="rb") as f:
+                    content = f.read()
+                simple_uploaded_file = SimpleUploadedFile(name=file_to_upload.name, content=content, content_type=file_to_upload.content_type)
+                files.append(dict(file_to_upload=file_to_upload, simple_uploaded_file=simple_uploaded_file))
+
+            response = file_graphql_query(
+                query=graphql_query_info.query,
+                op_name=graphql_query_info.operation_name,
+                input_data=graphql_query_info.input_data,
+                variables=graphql_query_info.graphql_variables,
+                headers=graphql_query_info.headers,
+                files={d["file_to_upload"].file_variable_name:d["simple_uploaded_file"] for d in files},
+                graphql_url=self.graphql_url()
+            )
+        else:
+            response = self.query(
+                query=graphql_query_info.query,
+                operation_name=graphql_query_info.operation_name,
+                input_data=graphql_query_info.input_data,
+                variables=graphql_query_info.graphql_variables,
+                headers=graphql_query_info.headers,
+            )
         # load the reponse as a json
         content = json.loads(response.content)
         return GraphQLResponseInfo(graphql_query_info, response, content)
+
+    def perform_simple_upload_mutation(self, query: str, upload_filepath: str, upload_filepath_name: str = "test_file", content_type: str = "text/plain", upload_file_variable_name: str = "file", encoding: str="utf-8"):
+        """
+        Contact an upload mutation and upload a single file
+        :param query: graphql endpoint to contact
+        :param upload_filepath: filepath of the file to upload
+        :param upload_filepath_name: name of the file to upload. if missing, it is test_file
+        :param content_type: type of the file to upload. If missing, it is text/plain
+        :param upload_file_variable_name: name of the argument associated to the file
+        :param encoding: encoding of the file to upload. Default to utf8
+        :return: output of the graphql query
+        """
+        graphql_query_info = GraphQLRequestInfo(
+            graphql_query=query,
+            files=[
+                FileToUpload(
+                    filepath=upload_filepath,
+                    name=upload_filepath_name,
+                    file_variable_name=upload_file_variable_name,
+                    encoding=encoding,
+                    content_type=content_type,
+                )
+            ]
+        )
+        return self.perform_graphql_query(graphql_query_info)
 
     def perform_simple_query(self, query_body: str) -> GraphQLResponseInfo:
         """

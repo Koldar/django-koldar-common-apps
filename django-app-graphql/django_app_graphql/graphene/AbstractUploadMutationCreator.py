@@ -1,5 +1,5 @@
 import abc
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 from django_koldar_utils.graphql.GraphQLHelper import GraphQLHelper
 from django_koldar_utils.graphql.graphql_decorators import graphql_submutation
@@ -7,8 +7,11 @@ from graphene_file_upload.django.testing import GraphQLFileUploadTestCase
 from graphene_file_upload.scalars import Upload
 
 from django_app_graphql.conf import DjangoAppGraphQLAppConf
+from django.core.files.uploadedfile import InMemoryUploadedFile
 
 import graphene
+
+settings = DjangoAppGraphQLAppConf()
 
 
 class AbstractUploadMutationCreator(abc.ABC):
@@ -16,14 +19,14 @@ class AbstractUploadMutationCreator(abc.ABC):
     An object that generates a single mutation that accept
     """
 
-    def get_upload_mutation_name(self) -> str:
+    def _get_upload_mutation_name(self) -> str:
         """
         Name of the class representing the mutation
         :return:
         """
         return "UploadMutation"
 
-    def get_upload_mutation_description(self) -> str:
+    def _get_upload_mutation_description(self) -> str:
         """
         Description of the upload mutation. default to class __doc__ string
         :return:
@@ -34,31 +37,31 @@ class AbstractUploadMutationCreator(abc.ABC):
         else:
             return ""
 
-    def upload_tag_name(self) -> str:
+    def _upload_tag_name(self) -> str:
         """
         name fo the string controlling the logic of the mutation to create
         :return:
         """
         return "tag"
 
-    def upload_name_name(self) -> str:
+    def _upload_name_name(self) -> str:
         """
         name of the string controlling the name of the upload file
         :return:
         """
         return "name"
 
-    def upload_description_name(self) -> str:
+    def _upload_description_name(self) -> str:
         return "description"
 
-    def upload_file_name(self) -> str:
+    def _upload_file_name(self) -> str:
         return "file"
 
-    def ok_flag_name(self) -> str:
+    def _ok_flag_name(self) -> str:
         return "ok"
 
     @abc.abstractmethod
-    def tag_check(self, info, file, name: str, description: str, tag: str, **kwargs) -> Tuple[bool, any]:
+    def _tag_check(self, info, file: InMemoryUploadedFile, name: str, description: str, tag: str, **kwargs) -> Tuple[bool, any]:
         """
         Check if the file the user has uploaded and the tags she has passed are compliant with server specification.
         E.g., here is the place where you should test that in the tag "photos" are uploaded only photos.
@@ -74,7 +77,7 @@ class AbstractUploadMutationCreator(abc.ABC):
         """
         pass
 
-    def do_if_tags_check_fails(self, info, file, name: str, description: str, tag: str, tag_check_output, **kwargs):
+    def _do_if_tags_check_fails(self, info, file: InMemoryUploadedFile, name: str, description: str, tag: str, tag_check_output, **kwargs):
         """
         What should we do if a tag check fails?
         :param info: graphql info structure
@@ -88,8 +91,22 @@ class AbstractUploadMutationCreator(abc.ABC):
         """
         raise ValueError(f"Tag Check on file named \"{name}\" has failed: {tag_check_output}")
 
+    def _generate_additional_mutation_arguments(self) -> Dict[str, any]:
+        """
+        geneate a dictionary of additional mutations arguments
+        :return:
+        """
+        return dict()
+
+    def _generate_additional_mutation_return_valies(self) -> Dict[str, any]:
+        """
+        Generate a dictionary of additionla mutation return values
+        :return:
+        """
+        return dict()
+
     @abc.abstractmethod
-    def perform_action_with_file(self, info, file, name: str, description: str, tags: List[str], **kwargs):
+    def _perform_action_with_file(self, info, file: InMemoryUploadedFile, name: str, description: str, tag: str, **kwargs):
         """
         Do something with the file that we have just received
         :param info:
@@ -102,39 +119,42 @@ class AbstractUploadMutationCreator(abc.ABC):
         """
         pass
 
-    def mutate(self, cls, info, file, name: str, description: str, tag: str, **kwargs):
-        satisfied, error_data = self.tag_check(info, file, name, description, tag, **kwargs)
+    def _check_settings(self):
+        if not settings.INCLUDE_UPLOAD_MUTATION:
+            raise ValueError(f"INCLUDE_UPLOAD_MUTATION has been set to False. This mutation won't be work correctly! Please set INCLUDE_UPLOAD_MUTATION.")
+
+    def _mutate(self, mutation_class, info, file: InMemoryUploadedFile, name: str, description: str, tag: str, **kwargs):
+        satisfied, error_data = self._tag_check(info, file, name, description, tag, **kwargs)
         if not satisfied:
-            self.do_if_tags_check_fails(info, file, name, description, tag, error_data, **kwargs)
+            self._do_if_tags_check_fails(info, file, name, description, tag, error_data, **kwargs)
 
         # do something with your file
+        self._perform_action_with_file(info, file, name, description, tag, **kwargs)
 
-
-        return cls(success=True)
-
-    def check_settings(self):
-        pass
-        # if not settings.INCLUDE_UPLOAD_MUTATION:
-        #     raise ValueError(f"INCLUDE_UPLOAD_MUTATION has been set to False. This mutation won't be work correctly! Please set INCLUDE_UPLOAD_MUTATION.")
+        return mutation_class(**{self._ok_flag_name(): True})
 
     def generate_upload_mutation(self):
-        self.check_settings()
+
+
+        self._check_settings()
         result = GraphQLHelper.create_mutation(
-            mutation_class_name=self.get_upload_mutation_name(),
-            description=self.get_upload_mutation_description(),
+            mutation_class_name=self._get_upload_mutation_name(),
+            description=self._get_upload_mutation_description(),
             arguments={
-                self.upload_tag_name(): GraphQLHelper.argument_required_string(description="""tag associated to the upload. 
+                self._upload_tag_name(): GraphQLHelper.argument_required_string(description="""tag associated to the upload. 
                         Usually you can use the tag to determine what to do with the upload 
                         (e.g., store the file in different static folders). We assume that it is the client 
                         that tells you the tags she wants. It is server responsibility to determine 
                         the correctness of these tags. Tags, by themselves, are just string with no further meaning."""),
-                self.upload_name_name(): GraphQLHelper.argument_required_string(description="name of the file to upload. Orthogonal w.r.t the filename"),
-                self.upload_description_name(): GraphQLHelper.argument_nullable_string(description="Description of the file. May be left missing"),
-                self.upload_file_name(): Upload(required=True, help_text="The file to upload to the server via graphql"),
+                self._upload_name_name(): GraphQLHelper.argument_required_string(description="name of the file to upload. Orthogonal w.r.t the filename"),
+                self._upload_description_name(): GraphQLHelper.argument_nullable_string(description="Description of the file. May be left missing"),
+                self._upload_file_name(): Upload(required=True, description="The file to upload to the server via graphql"),
+                **self._generate_additional_mutation_arguments(),
             },
             return_type={
-                self.ok_flag_name(): GraphQLHelper.return_ok()
+                self._ok_flag_name(): GraphQLHelper.return_ok(),
+                **self._generate_additional_mutation_return_valies(),
             },
-            body=self.mutate
+            body=self._mutate
         )
         return result
