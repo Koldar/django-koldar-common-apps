@@ -1,4 +1,5 @@
 from django.apps import AppConfig
+from django_koldar_utils.functions import modules
 
 
 class GraphqlSectionConfig(AppConfig):

@@ -1,13 +1,17 @@
+import inspect
 import os
 
 from django.conf import settings
 from appconf import AppConf
+from django_koldar_utils.django.conf.DictSettingMergerAppConf import DictSettingMergerAppConf
 
 
-class DjangoAppGraphQLAppConf(AppConf):
+class DjangoAppGraphQLAppConf(DictSettingMergerAppConf):
     class Meta:
         prefix = "DJANGO_APP_GRAPHQL"
-        #holder = "django_app_graphql.conf.settings"
+
+    def configure(self):
+        return self.merge_configurations()
 
     BACKEND_TYPE: str = "graphene"
     """
@@ -39,5 +43,10 @@ class DjangoAppGraphQLAppConf(AppConf):
     SAVE_GRAPHQL_SCHEMA = os.path.join("output", "graphql", "schema.graphql")
     """
     If not None, represents the file where we will dump the generated grpahql schema.
+    """
+
+    INCLUDE_UPLOAD_MUTATION = False
+    """
+    If set, we will include graphene_file_upload and expose a a mutation you can use to upload your files
     """
 

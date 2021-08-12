@@ -4,11 +4,13 @@ import os
 
 import graphene
 import stringcase
+from django_koldar_utils.functions import modules
 
 from django_koldar_utils.graphql.graphql_decorators import graphql_subquery, graphql_submutation
-from django_app_graphql.conf import settings
+from django_app_graphql.conf import DjangoAppGraphQLAppConf
 
 LOG = logging.getLogger(__name__)
+settings = DjangoAppGraphQLAppConf()
 
 SCHEMA: graphene.Schema = None
 
@@ -50,7 +52,7 @@ class DummyQuery(object):
 
 def create_schema():
     # Query
-    if len(graphql_subquery.query_classes) == 0 and settings.DJANGO_APP_GRAPHQL["ADD_DUMMY_QUERIES_IF_ABSENT"]:
+    if len(graphql_subquery.query_classes) == 0 and settings.ADD_DUMMY_QUERIES_IF_ABSENT:
         # add a query. graphene requires at least one
         LOG.warning(f"No queries present. Add some dummy queries")
         graphql_subquery.query_classes.append(DummyQuery)
@@ -64,7 +66,7 @@ def create_schema():
     Query = type('Query', bases, {})
 
     # Mutation
-    if len(graphql_submutation.mutation_classes) == 0 and settings.DJANGO_APP_GRAPHQL["ADD_DUMMY_MUTATIONS_IF_ABSENT"]:
+    if len(graphql_submutation.mutation_classes) == 0 and settings.ADD_DUMMY_MUTATIONS_IF_ABSENT:
         # add a query. graphene requires at least one
         graphql_submutation.mutation_classes.append(DummyMutation)
 
@@ -88,7 +90,7 @@ def create_schema():
 
     Mutation = type('Mutation', bases, properties)
 
-    if settings.DJANGO_APP_GRAPHQL["ENABLE_GRAPHQL_FEDERATION"]:
+    if settings.ENABLE_GRAPHQL_FEDERATION:
         import graphene_federation
         LOG.info(f"Building graphQL schema with federation support")
         schema = graphene_federation.build_schema(query=Query, mutation=Mutation)
@@ -96,8 +98,8 @@ def create_schema():
         LOG.info(f"Building graphQL schema without federatio nsupport")
         schema = graphene.Schema(query=Query, mutation=Mutation)
 
-    if settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"] is not None:
-        p = settings.DJANGO_APP_GRAPHQL["SAVE_GRAPHQL_SCHEMA"]
+    if settings.SAVE_GRAPHQL_SCHEMA is not None:
+        p = settings.SAVE_GRAPHQL_SCHEMA
         LOG.debug(f"Saving the whole generated graphql schema in {os.path.abspath(p)}")
         # create the path of the output
         os.makedirs(os.path.abspath(os.path.dirname(p)), exist_ok=True)

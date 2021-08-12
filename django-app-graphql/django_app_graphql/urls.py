@@ -1,14 +1,15 @@
 from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
-from django_app_graphql.conf import settings
+from django_app_graphql.conf import DjangoAppGraphQLAppConf
 from django.contrib import admin
 import logging
 
 urlpatterns = []
 LOG = logging.getLogger(__name__)
+settings = DjangoAppGraphQLAppConf()
 
-enable_graphiql = settings.DJANGO_APP_GRAPHQL["EXPOSE_GRAPHIQL"]
-backend = settings.DJANGO_APP_GRAPHQL["BACKEND_TYPE"]
+enable_graphiql = settings.EXPOSE_GRAPHIQL
+backend = settings.BACKEND_TYPE
 
 if backend == "ariadne":
     # ###################################################################
@@ -58,8 +59,14 @@ elif backend == "graphene":
     # ###################################################################
 
     def get_endpoint_from_graphene(enable_graphiql: bool):
-        from graphene_django.views import GraphQLView
-        return GraphQLView.as_view(graphiql=enable_graphiql)
+
+        if settings.INCLUDE_UPLOAD_MUTATION:
+            LOG.info(f"Including FileUploadGraphQLView, since we want to upload mutations...")
+            from graphene_file_upload.django import FileUploadGraphQLView
+            return FileUploadGraphQLView.as_view(graphiql=enable_graphiql)
+        else:
+            from graphene_django.views import GraphQLView
+            return GraphQLView.as_view(graphiql=enable_graphiql)
 
 
     view = get_endpoint_from_graphene(enable_graphiql)
@@ -68,7 +75,7 @@ else:
 
 
 urlpatterns.append(path(
-    settings.DJANGO_APP_GRAPHQL["GRAPHQL_SERVER_URL"],
+    settings.GRAPHQL_SERVER_URL,
     csrf_exempt(view)
 ))
 
