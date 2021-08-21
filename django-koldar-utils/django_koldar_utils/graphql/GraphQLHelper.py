@@ -7,6 +7,7 @@ import stringcase
 import logging
 
 from django_koldar_utils.django import filters_helpers, django_helpers, permissions_helpers, auth_decorators
+from django_koldar_utils.functions import python_helpers
 from django_koldar_utils.graphql import graphql_decorators, error_codes
 from django_koldar_utils.graphql.GraphQLAppError import GraphQLAppError
 
@@ -221,10 +222,174 @@ class FederationCrudOperationNamer(NamespacedCrudOperationNamer):
         super().__init__(prefix=namespace, suffix="")
 
 
+class IAddRemoveElementGraphql(abc.ABC):
+    """
+    A class that generates classes representing graphql queries adding adn removing items from a relationship.
+    Relationship can
+    """
+
+
+    def generate(self, django_list_owner_type: type, django_element_type: type,
+          graphene_element_input_type: type, relation_name: str,
+          manager_for_the_list: str, fields_to_check: List[str],
+          mutation_class_name: str = None,
+          description: Union[str, Callable[[str], str]] = None,
+          active_flag_name: str = None, input_name: str = None,
+          output_name: str = None, add_if_not_present: bool = False,
+          old_length_output_name: str = None, new_length_output_name: str = None,
+          added_output_name: str = None, created_output_name: str = None,
+          additional_mutation_inputs: Dict[str, any] = None):
+        """
+        :param django_list_owner_type: django type owning a list of items of type django_element_owner_type
+        :param django_element_type: django type of the array of list
+        :param relation_name: name of the relationship represented by the list
+        :param description: description of the grpahql mutation. If it is a callable, the first argument is the default description.
+        :param graphene_element_input_type: graphene type representing a single cell in the list owned by django_list_owner_type. The type represents a graphql input type.
+        :param fields_to_check: list fo fields in the mutation graphene input that we need to check to determine if the object to add is already been
+            added to the collection. If all the fields are equal, we will declare that the object is already added in the collection.
+            If left missing, it is the list of all the unique fields of django_element_type
+        :param manager_for_the_list: name of the variable of django_list_owner_type allowing you to gain access to the list of objects associated with the relation relation_name.
+        :param add_if_not_present: if this variable is set to True, if the user add a non persisteed django_element_type instance as the input of the mutation,
+            we will first persist such an object
+        :param input_name: name of the mutation argument containing the element to add in the relationship
+        :param output_name: name of the mutation argument containing the element just added in the relationship
+        :param old_length_output_name: name of the mutation output containign the number of element in the collection before the element was added
+        :param new_length_output_name: name of the mutation output containing the number of element in the collection after the element was added
+        :param added_output_name: name of the mutation output containing true if we have added a new element in the collection, false otherwise
+        :param created_output_name: name of the mutation output containing true if we have created a new element in the database before adding it in the collection, false otherwise
+        :param additional_mutation_inputs: dictionary of additional mutatation input you want to add in the generating mutation
+        :reutrn: type representing this add element to list mutation
+        """
+        if mutation_class_name is None:
+            mutation_class_name = f"Add{django_element_type.__name__}To{relation_name}Of{django_list_owner_type.__name__}"
+        if description is None:
+            if add_if_not_present:
+                not_present = "We will persist it first by creating the object"
+            else:
+                not_present = "We will raise exception"
+            dsc = f"""Allows to add a new element of type {django_element_type.__name__} to the list owned
+                by class {django_list_owner_type.__name__} associated with the relation \"{relation_name}\". If an element
+                is already within such a list we do nothing. If the element input is not already persisted in the database (i.e., the input has an id not null), {not_present}. 
+                If the item to add has the active flag set to False, we do nothing. 
+                The function returns the element added in the relationship as well as the previous and after length of the collection w.r.t. the add operation.
+                We will also return whether or not we actually have added the new item to the collection and if we had to first create a new item
+                in the database.
+                """
+            if python_helpers.is_function(description):
+                description = description(dsc)
+            else:
+                description = dsc
+        if active_flag_name is None:
+            active_flag_name = "active"
+        if input_name is None:
+            input_name = "item"
+        if output_name is None:
+            output_name = f"{relation_name}AddOutcome"
+        if fields_to_check is None:
+            # fetch all the unique fields
+            fields_to_check = list(django_helpers.get_unique_field_names(django_element_type))
+        if old_length_output_name is None:
+            old_length_output_name = f"{relation_name}OldLength"
+        if new_length_output_name is None:
+            new_length_output_name = f"{relation_name}NewLength"
+        if added_output_name is None:
+            added_output_name = f"{relation_name}Added"
+        if created_output_name is None:
+            created_output_name = f"{relation_name}Created"
+
+        # if token_name is None:
+        #     token_name = "token"
+        # if active_flag_name is None:
+        #     active_flag_name = "active"
+        # if fields_to_check is None:
+        #     # fetch all the unique fields
+        #     fields_to_check = list(django_helpers.get_unique_field_names(django_type))
+        # if description is None:
+        #     description = f"""Allows you to create a new instance of {django_type.__name__}.
+        #         If the object is already present we throw an exception.
+        #         We raise an exception if we are able to find a row in the database with the same fields: {', '.join(fields_to_check)}.
+        #     """
+        #     if permissions_required is not None:
+        #         description += f"""Note that you need to authenticate your user in order to use this mutation.
+        #         The permission your user is required to have are: {', '.join(permissions_required)}.
+        #         """
+        # if input_name is None:
+        #     input_name = stringcase.camelcase(django_type.__name__)
+        # if output_name is None:
+        #     output_name = stringcase.camelcase(django_type.__name__)
+        # if hasattr(mutation_class_name, "__call__"):
+        #     # if create_mutation_name is a function, call it
+        #     mutation_class_name = mutation_class_name(django_type.__name__)
+
+        def body(mutation_class, info, *args, **kwargs) -> any:
+            result_create = False
+
+            input = kwargs[input_name]
+            d = dict()
+            for f in fields_to_check:
+                d[f] = getattr(input, f)
+            d[active_flag_name] = True
+            # check if the element we need to add exists in the database
+            if not django_element_type.objects.has_at_least_one(**d):
+                if add_if_not_present:
+                    # we need to create the object
+                    # create argument and omits the None values
+                    create_args = {k: v for k, v in dict(input).items() if v is not None}
+                    object_to_add = django_element_type.objects.create(**create_args)
+                    if object_to_add is None:
+                        raise GraphQLAppError(error_codes.CREATION_FAILED, object=django_element_type.__name__,
+                                              values=create_args)
+                    result_create = True
+                else:
+                    raise GraphQLAppError(error_codes.OBJECT_NOT_FOUND, object=django_element_type.__name__, values=d)
+            else:
+                object_to_add = django_element_type.objects.get(**d)
+
+            # ok, now add the relationship (if needed)
+            old_len = getattr(django_list_owner_type, manager_for_the_list).all().count()
+            getattr(django_list_owner_type, manager_for_the_list).add(object_to_add)
+            new_len = getattr(django_list_owner_type, manager_for_the_list).all().count()
+            result_added = new_len > old_len
+
+            # yield result
+            return mutation_class(
+                **{output_name: object_to_add, added_output_name: result_added, created_output_name: result_create,
+                   old_length_output_name: old_len, new_length_output_name: new_len})
+
+        arguments = dict()
+        arguments[input_name] = cls.argument_required_input(graphene_element_input_type,
+                                                            description="The object to add into the database. id should not be populated. ")
+        # if permissions_required is not None:
+        #     arguments[token_name] = cls.argument_jwt_token()
+        #     body = auth_decorators.graphql_ensure_login_required()(body)
+        #     body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
+
+        return cls.create_mutation(
+            mutation_class_name=str(mutation_class_name),
+            description=description,
+            arguments={**arguments, **additional_mutation_inputs},
+            return_type={
+                output_name: cls.returns_nonnull(django_element_type,
+                                                 description=f"the {django_element_type.__name__} we just added in the relation"),
+                added_output_name: cls.returns_required_boolean(
+                    description=f"True if we had added a new item in the collection, false otherwise"),
+                created_output_name: cls.returns_required_boolean(
+                    description=f"True if we had created the new item in the database before adding it to the relation"),
+                old_length_output_name: cls.returns_required_int(
+                    description=f"The number of elements in the collection before the add operation was performed"),
+                new_length_output_name: cls.returns_required_int(
+                    description=f"The number of elements in the collection after the add operation was performed"),
+            },
+            body=body
+        )
+
+
 class GraphQLHelper(object):
     """
-    Class used to generate relevant fields for graphql
+    Class used to generate relevant queries and mutations fields for graphql
     """
+
+
 
     @classmethod
     def generate_graphql_crud_of(cls,
@@ -800,7 +965,7 @@ class GraphQLHelper(object):
     @classmethod
     def generate_mutation_update_primitive_data(cls, django_type: type, django_graphql_type: type, django_input_type: type,
                                  description: str = None, input_name: str = None,
-                                 output_name: str = None, permissions_required: List[str] = None, mutation_class_name: Union[str, Callable[[str], str]] = None, token_name: str = None) -> type:
+                                 active_flag_name: str = None, output_name: str = None, permissions_required: List[str] = None, mutation_class_name: Union[str, Callable[[str], str]] = None, token_name: str = None) -> type:
         """
         Create a mutation that revise a previously added element in the database to a newer version.
         This mutation updates only the primitive fields within the entity, jnot the relationships.
@@ -826,16 +991,19 @@ class GraphQLHelper(object):
         """
 
         primary_key_name = django_helpers.get_name_of_primary_key(django_type)
+        if active_flag_name is None:
+            active_flag_name = "active"
         if token_name is None:
             token_name = "token"
         if mutation_class_name is None:
             mutation_class_name = f"UpdatePrimitive{django_type.__name__}",
         if description is None:
-            description = f"""Allows you to create a new instance of {django_type.__name__}. 
+            description = f"""Allows you to update a previously created new instance of {django_type.__name__}. 
                     If the object is already present we throw an exception.
                     We raise an exception if we are able to find a row in the database with the same primary key: {primary_key_name}.
                     With this mutation, it is possible to alter only the primitive fields belonging to the entity.
-                    In other words, association between models cannot be altered with this mutation.
+                    If the model instance is not active, we will do nothing. Every field which is left missing, is skipped.
+                    In other words, association between models as well as pruimary key cannot be altered with this mutation.
                 """
             if permissions_required is not None:
                 description += f"""Note that you need to authenticate your user in order to use this mutation.
@@ -854,16 +1022,16 @@ class GraphQLHelper(object):
 
             d = dict()
             d[primary_key_name] = primary_key_value
+            d[active_flag_name] = True
             if not django_type.objects.has_at_least_one(**d):
                 raise GraphQLAppError(error_codes.OBJECT_NOT_FOUND, object=django_type.__name__, values=d)
             # create argument and omits the None values
-            create_args = {k: v for k, v in dict(input).items() if v is not None}
 
             result = django_type.objects.find_only_or_fail(**d)
             input_as_dict = dict(input)
             for f in django_helpers.get_primitive_fields(django_type):
                 name = f.attname
-                if not f.is_relation and name in input_as_dict:
+                if (not f.is_relation) and (name in input_as_dict) and (input_as_dict[name] is not None):
                     # we ignore fields that are relations
                     setattr(result, name, input_as_dict[name])
             result.save()
@@ -1219,7 +1387,7 @@ class GraphQLHelper(object):
         :return: argument of a mutation
         """
         if description is None:
-            description = f"input of type {input_type._meta.model}"
+            description = f"input of type {input_type.model.__name__}"
         return graphene.Argument(input_type, required=True, description=description)
 
     @classmethod
@@ -1252,7 +1420,7 @@ class GraphQLHelper(object):
     @classmethod
     def return_ok(cls, description: str = None) -> graphene.Boolean:
         """
-        A boolean, which tells if the mutation was successful or not
+        A boolean, which tells if the mutation was successful or not, as the return value of either a query or a grpahql mutation
 
         :param description: additional description for the query. It will be concatenated after the default description
         :return: graphene type
@@ -1262,7 +1430,7 @@ class GraphQLHelper(object):
     @classmethod
     def returns_required_boolean(cls, description: str = None) -> graphene.Boolean:
         """
-        A boolean, which needs to be always present
+        A boolean, which needs to be always present, as the return value of either a query or a grpahql mutation
 
         :param description: additional description for the query. It will be concatenated after the default description
         :return: graphene type
@@ -1270,9 +1438,29 @@ class GraphQLHelper(object):
         return graphene.Boolean(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} {description or ''}")
 
     @classmethod
+    def returns_required_int(cls, description: str = None) -> graphene.Int:
+        """
+        A int, which needs to be always present, as the return value of either a query or a grpahql mutation
+
+        :param description: additional description for the query. It will be concatenated after the default description
+        :return: graphene type
+        """
+        return graphene.Int(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} {description or ''}")
+
+    @classmethod
+    def returns_required_float(cls, description: str = None) -> graphene.Float:
+        """
+        A float, which needs to be always present, as the return value of either a query or a grpahql mutation
+
+        :param description: additional description for the query. It will be concatenated after the default description
+        :return: graphene type
+        """
+        return graphene.Float(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} {description or ''}")
+
+    @classmethod
     def returns_required_string(cls, description: str = None) -> graphene.String:
         """
-        A strnig, which needs to be always present:
+        A strnig, which needs to be always present, as the return value of either a query or a grpahql mutation
 
         :param description: additional description for the query. It will be concatenated after the default description
         :return: graphene type

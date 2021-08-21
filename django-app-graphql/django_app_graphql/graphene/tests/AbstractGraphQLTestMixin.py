@@ -7,6 +7,7 @@ import sys
 from typing import Dict, Tuple, Callable, Union, List
 
 import jmespath
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.handlers.wsgi import WSGIRequest
 from graphene.test import Client
@@ -54,6 +55,81 @@ class GraphQLResponseInfo(object):
         self.request = request
         self.response = response
         self.content = content
+
+
+    def query_content(self, path: str) -> any:
+        """
+        Query the content in a generic way
+        :param path:
+        :return:
+        """
+        result = jmespath.search(path, self.content)
+        return result
+
+    def get_only_int(self, path: str):
+        """
+        perform a jmes query on the body. Then, check that there is only one from the response
+        :param path: path to investigate
+        :return: the only integer found or an exception if multiple or none are found
+        """
+        result = jmespath.search(path, self.content)
+        if isinstance(result, list):
+            raise ValueError(f"should have fetched one integer, but got {result}")
+        if result is None:
+            raise ValueError(f"should have been one integer. Got none of them!")
+        return int(result)
+
+    def get_first_int(self, path: str):
+        result = jmespath.search(path, self.content)
+        if isinstance(result, list):
+            val = int(result[0])
+        else:
+            val = int(result)
+        return val
+
+    def get_only_string(self, path: str):
+        """
+        perform a jmes query on the body. Then, check that there is only one from the response
+        :param path: path to investigate
+        :return: the only string found or an exception if multiple or none are found
+        """
+        result = jmespath.search(path, self.content)
+        if isinstance(result, list):
+            raise ValueError(f"should have fetched one string, but got {result}")
+        if result is None:
+            raise ValueError(f"should have been one string. Got none of them!")
+        return str(result)
+
+    def get_first_string(self, path: str):
+        result = jmespath.search(path, self.content)
+        if isinstance(result, list):
+            val = str(result[0])
+        else:
+            val = str(result)
+        return val
+
+    def get_only_bool(self, path: str):
+        """
+        perform a jmes query on the body. Then, check that there is only one from the response
+        :param path: path to investigate
+        :return: the only bool found or an exception if multiple or none are found
+        """
+        result = jmespath.search(path, self.content)
+        if isinstance(result, list):
+            raise ValueError(f"should have fetched one boolean, but got {result}")
+        if result is None:
+            raise ValueError(f"should have been one boolean. Got none of them!")
+        return bool(result)
+
+    def get_first_bool(self, path: str):
+
+        result = jmespath.search(path, self.content)
+        if isinstance(result, list):
+            val = bool(result[0])
+        else:
+            val = bool(result)
+        return val
+
 
 
 GraphQLAssertionConstraint = Callable[[GraphQLResponseInfo], Tuple[bool, str]]
@@ -645,4 +721,83 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             expected_result=(lb, ub, lb_included, ub_included),
             comparison_function=compare_range
         )
+
+    def assert_file_exists(self, f: str):
+        """
+        Assert the fact that some file exists
+        :param f: file to check. Relative to MEDIA_ROOT
+        :return:
+        """
+        p = os.path.abspath(os.path.relpath(f, start=os.path.abspath(settings.MEDIA_ROOT)))
+        if not os.path.exists(p):
+            raise AssertionError(f"file at path {p} does not exist!")
+
+    def assert_file_with_search_regex_exists(self, regex: str, cwd: str = None):
+        """
+        List the files in the cwd directory consider.  if we are able to find a file whose basename
+        follows the given regex, the assertion succeeds
+        :param regex: regex we **search**
+        :param cwd: directory where we need to look file
+        :return:
+        """
+        if cwd is None:
+            os.getcwd()
+        cwd = os.path.abspath(cwd)
+        for path in os.listdir(cwd):
+            if os.path.isfile(os.path.join(cwd,path)):
+                if re.search(regex, path) is not None:
+                    return True
+        else:
+            raise AssertionError(f"no file under {cwd} has the search regex {regex}!")
+
+    def assert_file_with_match_regex_exists(self, regex: str, cwd: str = None):
+        """
+        List the files in the cwd directory consider.  if we are able to find a file whose basename
+        follows the given regex, the assertion succeeds
+        :param regex: regex we **match**
+        :param cwd: directory where we need to look file
+        :return:
+        """
+        if cwd is None:
+            os.getcwd()
+        cwd = os.path.abspath(cwd)
+        for path in os.listdir(cwd):
+            if os.path.isfile(os.path.join(cwd,path)):
+                if re.match(regex, path) is not None:
+                    return True
+        else:
+            raise AssertionError(f"no file under {cwd} has the match regex {regex}!")
+
+    def assert_file_with_search_regex_absent(self, regex: str, cwd: str = None):
+        """
+        List the files in the cwd directory consider.  if we are **not** able to find a file whose basename
+        follows the given regex, the assertion succeeds
+        :param regex: regex we **search**
+        :param cwd: directory where we need to look file
+        :return:
+        """
+        if cwd is None:
+            os.getcwd()
+        cwd = os.path.abspath(cwd)
+        for path in os.listdir(cwd):
+            if os.path.isfile(os.path.join(cwd, path)):
+                if re.search(regex, path) is not None:
+                    raise AssertionError(f"the file {path} under {cwd} has the search regex {regex}!")
+
+    def assert_file_with_match_regex_absent(self, regex: str, cwd: str = None):
+        """
+        List the files in the cwd directory consider.  if we are able **not** to find a file whose basename
+        follows the given regex, the assertion succeeds
+        :param regex: regex we **match**
+        :param cwd: directory where we need to look file
+        :return:
+        """
+        if cwd is None:
+            os.getcwd()
+        cwd = os.path.abspath(cwd)
+        for path in os.listdir(cwd):
+            if os.path.isfile(os.path.join(cwd, path)):
+                if re.match(regex, path) is not None:
+                    raise AssertionError(f"the file {path} under {cwd} has the search regex {regex}!")
+
 

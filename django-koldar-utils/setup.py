@@ -38,6 +38,9 @@ s = library_setup.LibraryScriptSetup(
         "stringcase>=1.2.0",
         "urllib3>=1.26.5",
         "jmespath>=0.10.0",
+        "pillow>=8.3.1",
+        "hurry.filesize>=0.9",
+        "datasize>=1.0.0",
     ]
 )
 

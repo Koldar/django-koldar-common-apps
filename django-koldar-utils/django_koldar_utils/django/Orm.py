@@ -908,3 +908,27 @@ class Orm:
         if description is None:
             description = "Unique Id representing the concept"
         return models.BigAutoField(db_column=column_name, primary_key=True, help_text=description)
+
+    @classmethod
+    def image_with_default(cls, upload_to: str, default_image: str, description: str = None, **kwargs) -> models.ImageField:
+        """
+        create a field representing an image. The user may not specify any image: in this case the defulat image will be passed. The image will be stored in the specified storage location
+
+        :param upload_to: the directory (if relative, relative to MEDIA_ROOT) where the image will be saved.
+            see https://docs.djangoproject.com/en/3.2/ref/models/fields/#django.db.models.FileField.upload_to
+        :param default_image: name of the default image that will be used if no image is passed. It is a path
+            (e.g., 'default.jpg') which depend on the django storage chosen
+        :param description: description of the field
+        :param kwargs: other parameters to send to the ImageField
+        """
+        if description is None:
+            description = f"Image representing the concept that will be saved in the {upload_to} storage"
+
+        return models.ImageField(
+            default=default_image,
+            upload_to=upload_to,
+            help_text=description,
+            max_length=500,
+            **kwargs
+        )
+
