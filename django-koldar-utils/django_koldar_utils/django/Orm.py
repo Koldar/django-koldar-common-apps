@@ -1,3 +1,4 @@
+import abc
 import re
 from datetime import timedelta
 from typing import List, Tuple, Any, Callable, Union, Optional
@@ -5,16 +6,67 @@ from typing import List, Tuple, Any, Callable, Union, Optional
 import traceback
 import os
 import inflection as inflection
+import stringcase
 from arrow import Arrow
 from django.db import models
 
+from django_koldar_utils.django.fields.ArrowDateField import ArrowDateField
+from django_koldar_utils.django.fields.ArrowDurationField import ArrowDurationField
 from django_koldar_utils.django.fields.ArrowField import ArrowField
 
+
+class INamingScheme(abc.ABC):
+    """
+    Interface representing a naming scheme for tables, relationships and foreign keys
+    """
+
+    @abc.abstractmethod
+    def get_table_name(self, app_name: str, model_cls: str) -> str:
+        pass
+
+    @abc.abstractmethod
+    def get_relationship_name(self, app_name: str, relationship_name: str, base_models: List[str]) -> str:
+        pass
+
+    @abc.abstractmethod
+    def get_foreign_key_name(self, relationship_name: str, target_model: str) -> str:
+        pass
+
+
+class VerboseNamingScheme(INamingScheme):
+
+    def get_table_name(self, app_name: str, model_cls: str) -> str:
+        app_name = app_name.replace("_section", "")
+        return f"{app_name}={model_cls}"
+
+    def get_relationship_name(self, app_name: str, relationship_name: str, base_models: List[str]) -> str:
+        app_name = app_name.replace("_section", "")
+        return f"{app_name}={relationship_name}({','.join(base_models)})"
+
+    def get_foreign_key_name(self, relationship_name: str, target_model: str) -> str:
+        return f"id_{relationship_name}_{target_model}"
+
+
+class StandardNamingScheme(INamingScheme):
+
+    def get_table_name(self, app_name: str, model_cls: str) -> str:
+        app_name = app_name.replace("_section", "")
+        app_name_lc = stringcase.lowercase(app_name)
+        model_cls_lc = stringcase.lowercase(model_cls)
+
+        return f"{app_name_lc}.{model_cls_lc}"
+
+    def get_relationship_name(self, app_name: str, relationship_name: str, base_models: List[str]) -> str:
+        return f"{stringcase.lowercase(relationship_name)}_{'_'.join(map(stringcase.lowercase, base_models))}"
+
+    def get_foreign_key_name(self, relationship_name: str, target_model: str) -> str:
+        return stringcase.lowercase(f"id_{relationship_name}_{target_model}")
 
 
 class Orm:
 
     _table_convention = "verbose"
+    _naming_scheme = VerboseNamingScheme()
 
     @classmethod
     def set_table_naming_convention(cls, v: str):
@@ -25,6 +77,14 @@ class Orm:
             - verbose: we use "=" inside table names and we generate relationships name as they were predicates
             - standard: we use "." in table names and we generate realtionship names by concatenating the table names with "_"
         """
+
+        if v == "verbose":
+            cls._naming_scheme = VerboseNamingScheme()
+        elif v == "standard":
+            cls._naming_scheme = StandardNamingScheme()
+        else:
+            raise ValueError(f"unindentified naming scheme {v}!")
+
         cls._table_convention = v
 
     DO_NOT_CREATE_INVERSE_RELATION = "+"
@@ -60,13 +120,7 @@ class Orm:
     @classmethod
     def create_table_name(cls, model_cls: str) -> str:
         app_name = Orm.get_current_app_name()
-        app_name = app_name.replace("_section", "")
-        if cls._table_convention == "verbose":
-            return f"{app_name}={model_cls}"
-        elif cls._table_convention == "standard":
-            return f"{app_name}.{model_cls}"
-        else:
-            raise ValueError(f"invalid table convention value {cls._table_convention}!")
+        return cls._naming_scheme.get_table_name(app_name, model_cls)
 
     @classmethod
     def create_n_n_table_name(cls, name: str, basemodels: List[str]):
@@ -77,7 +131,7 @@ class Orm:
         :return:
         """
         app_name = Orm.get_current_app_name()
-        app_name = app_name.replace("_section", "")
+
         result = []
         for m in basemodels:
             if isinstance(m, str):
@@ -89,13 +143,11 @@ class Orm:
             else:
                 raise TypeError(f"Invalid model type {type(m)}")
 
-        if cls._table_convention == "verbose":
-            return f"{app_name}={name}({','.join(result)})"
-        elif cls._table_convention == "standard":
-            return f"{name}_{'_'.join(result)}"
-        else:
-            raise ValueError(f"invalid table convention value {cls._table_convention}!")
+        return cls._naming_scheme.get_relationship_name(app_name, name, result)
 
+    @classmethod
+    def get_foreign_key_name(cls, relationship_name: str, target_model: str) -> str:
+        return cls._naming_scheme.get_foreign_key_name(relationship_name, target_model)
 
     @staticmethod
     def generic_field_simple(field_type: type, null: bool, blank: bool, default: Union[Any, Callable[[], Any]],
@@ -186,13 +238,13 @@ class Orm:
         return field_type(**d)
 
     @staticmethod
-    def required_long_string(help_text: str) -> models.CharField:
+    def required_long_string(description: str) -> models.CharField:
         return Orm.generic_field(
             field_type=models.CharField,
             null=False,
             blank=False,
             default=None,
-            help_text=help_text,
+            help_text=description,
 
             choices=None,
             db_column=None,
@@ -433,15 +485,15 @@ class Orm:
         """
         one author has many publications and each publication is made by many authros.
         This should be put in the "author"
-        :param from_model: author
-        :param to_model: publication
+        :param from_model: The model that specifies this function call (e.g., author)
+        :param to_model: the model that has the corresponding relationship_many_to_many_simple_inverse publication
         :param on_delete: what to do whenever a delete is performed
         :param help_text: help text
         :param related_name: name of the inverse relations
         :return:
         """
         return models.ManyToManyField(
-            from_model,
+            to_model,
             help_text=help_text,
             related_name=related_name,
             db_table=Orm.create_n_n_table_name(relationship_name, [from_model, to_model])
@@ -499,7 +551,7 @@ class Orm:
             null=False,
             related_name=related_name,
             related_query_name=related_query_name,
-            db_column=f"id_{relationship_name}_{single_model}"
+            db_column=Orm.get_foreign_key_name(relationship_name, single_model)
         )
 
     @classmethod
@@ -540,7 +592,7 @@ class Orm:
             null=True,
             related_name=related_name,
             related_query_name=related_query_name,
-            db_column=f"id_{relationship_name}_{single_model}"
+            db_column=Orm.get_foreign_key_name(relationship_name, single_model),
         )
 
     @classmethod
@@ -561,7 +613,7 @@ class Orm:
             blank=False,
             related_name=related_name,
             related_query_name=related_query_name,
-            db_column=f"id_{relationship_name}_{to_model}"
+            db_column=Orm.get_foreign_key_name(relationship_name, to_model),
         )
 
     @classmethod
@@ -594,7 +646,7 @@ class Orm:
             blank=True,
             related_name=related_name,
             related_query_name=related_query_name,
-            db_column=f"id_{relationship_name}_{to_model}"
+            db_column=Orm.get_foreign_key_name(relationship_name, to_model),
         )
 
     @classmethod
@@ -776,7 +828,7 @@ class Orm:
         )
 
     @classmethod
-    def required_blank_string(cls, help_text: str, default_value: Union[str, Callable[[], str]] = None, max_length: int = None) -> models.CharField:
+    def required_blank_string(cls, description: str, default_value: Union[str, Callable[[], str]] = None, max_length: int = None) -> models.CharField:
         if max_length is None:
             max_length = 255
         return Orm.generic_field_simple(
@@ -784,7 +836,7 @@ class Orm:
             null=False,
             blank=True,
             default=default_value,
-            help_text=help_text
+            help_text=description
         )
 
     @classmethod
@@ -820,18 +872,34 @@ class Orm:
             max_length=None
         )
 
+    @classmethod
+    def required_arrow_duration(cls, description: str = None, default_value: timedelta = None) -> ArrowDurationField:
+        return ArrowDurationField(
+            null=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def nullable_arrow_duration(cls, description: str = None, default_value: timedelta = None) -> ArrowDurationField:
+        return ArrowDurationField(
+            null=True,
+            default=default_value,
+            help_text=description
+        )
+
     @staticmethod
-    def required_duration(help_text: str, default_value: Union[timedelta, Callable[[], timedelta]] = None) -> models.DurationField:
+    def required_duration(description: str, default_value: Union[timedelta, Callable[[], timedelta]] = None) -> models.DurationField:
         return Orm.generic_field_simple(
             field_type=models.DurationField,
             null=False,
             blank=False,
             default=default_value,
-            help_text=help_text
+            help_text=description
         )
 
     @staticmethod
-    def required_datetime(help_text: str,
+    def required_datetime(description: str,
                           default_value: Union[Arrow, Callable[[], Arrow]] = None) -> ArrowField:
         """
         tell django that this model has a date time that needs to be set
@@ -841,18 +909,43 @@ class Orm:
             null=False,
             blank=False,
             default=default_value,
-            help_text=help_text
+            help_text=description
         )
 
     @staticmethod
-    def nullable_datetime(help_text: str,
+    def nullable_datetime(description: str,
                           default_value: Union[Arrow, Callable[[], Arrow]] = None) -> ArrowField:
         return Orm.generic_field_simple(
             field_type=ArrowField,
             null=True,
             blank=False,
             default=default_value,
-            help_text=help_text
+            help_text=description
+        )
+
+    @staticmethod
+    def required_date(description: str,
+                          default_value: Union[Arrow, Callable[[], Arrow]] = None) -> ArrowDateField:
+        """
+        tell django that this model has a date that needs to be set
+        """
+        return Orm.generic_field_simple(
+            field_type=ArrowDateField,
+            null=False,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @staticmethod
+    def nullable_date(description: str,
+                          default_value: Union[Arrow, Callable[[], Arrow]] = None) -> ArrowDateField:
+        return Orm.generic_field_simple(
+            field_type=ArrowDateField,
+            null=True,
+            blank=False,
+            default=default_value,
+            help_text=description
         )
 
     @classmethod
@@ -860,6 +953,83 @@ class Orm:
         return Orm.generic_field_simple(
             field_type=models.BooleanField,
             null=False,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def nullable_boolean(cls, description: str,
+                         default_value: Union[bool, Callable[[], bool]] = None) -> models.BooleanField:
+        return Orm.generic_field_simple(
+            field_type=models.BooleanField,
+            null=True,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def required_int(cls, description: str,
+                         default_value: Union[int, Callable[[], int]] = None) -> models.BooleanField:
+        return Orm.generic_field_simple(
+            field_type=models.IntegerField,
+            null=False,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def nullable_int(cls, description: str,
+                     default_value: Union[int, Callable[[], int]] = None) -> models.BooleanField:
+        return Orm.generic_field_simple(
+            field_type=models.IntegerField,
+            null=True,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def required_long(cls, description: str,
+                     default_value: Union[int, Callable[[], int]] = None) -> models.BooleanField:
+        return Orm.generic_field_simple(
+            field_type=models.BigIntegerField,
+            null=False,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def nullable_long(cls, description: str,
+                     default_value: Union[int, Callable[[], int]] = None) -> models.BooleanField:
+        return Orm.generic_field_simple(
+            field_type=models.BigIntegerField,
+            null=True,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def required_bytes(cls, description: str,
+                      default_value: Union[bytes, Callable[[], bytes]] = None) -> models.BooleanField:
+        return Orm.generic_field_simple(
+            field_type=models.BinaryField,
+            null=False,
+            blank=False,
+            default=default_value,
+            help_text=description
+        )
+
+    @classmethod
+    def nullable_bytes(cls, description: str,
+                      default_value: Union[bytes, Callable[[], bytes]] = None) -> models.BooleanField:
+        return Orm.generic_field_simple(
+            field_type=models.BinaryField,
+            null=True,
             blank=False,
             default=default_value,
             help_text=description
@@ -908,6 +1078,63 @@ class Orm:
         if description is None:
             description = "Unique Id representing the concept"
         return models.BigAutoField(db_column=column_name, primary_key=True, help_text=description)
+
+    @classmethod
+    def required_file(cls, upload_to: str, add_day: bool = False, format_str: str = None, description: str = None) -> models.FileField:
+        """
+        A file that needs to be set. The file will not be saved in the database itself, bt rather in a persistent storage
+        (most likely a file system)
+
+        :param upload_to: path of the storage where we are going to save the file
+        :param add_day: if specified, we will add a date specified to the upload path in order to separate the upload
+            files by time. Disabled by default
+        :param format_str: the default time format to add if add_day is set. Defaults to "%Y/%m/%d"
+        :param description: description of the field
+        :return: file field upload
+        """
+        if not upload_to.endswith("/"):
+            upload_to = upload_to + "/"
+        if format_str is None:
+            format_str = "%Y/%m/%d"
+        if add_day is not None:
+            upload_to = upload_to + format_str
+        if not upload_to.endswith("/"):
+            upload_to = upload_to + "/"
+        return models.FileField(
+            upload_to=upload_to,
+            null=False,
+            blank=False,
+            help_text=description
+        )
+
+    @classmethod
+    def nullable_file(cls, upload_to: str, add_day: bool = False, format_str: str = None,
+                      description: str = None) -> models.FileField:
+        """
+        A file that can be null. The file will not be saved in the database itself, bt rather in a persistent storage
+        (most likely a file system)
+
+        :param upload_to: path of the storage where we are going to save the file
+        :param add_day: if specified, we will add a date specified to the upload path in order to separate the upload
+            files by time. Disabled by default
+        :param format_str: the default time format to add if add_day is set. Defaults to "%Y/%m/%d"
+        :param description: description of the field
+        :return: file field upload
+        """
+        if not upload_to.endswith("/"):
+            upload_to = upload_to + "/"
+        if format_str is None:
+            format_str = "%Y/%m/%d"
+        if add_day is not None:
+            upload_to = upload_to + format_str
+        if not upload_to.endswith("/"):
+            upload_to = upload_to + "/"
+        return models.FileField(
+            upload_to=upload_to,
+            null=True,
+            blank=False,
+            help_text=description
+        )
 
     @classmethod
     def image_with_default(cls, upload_to: str, default_image: str, description: str = None, **kwargs) -> models.ImageField:

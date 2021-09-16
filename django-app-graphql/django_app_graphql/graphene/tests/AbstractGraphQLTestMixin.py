@@ -4,16 +4,27 @@ import operator
 import os
 import re
 import sys
-from typing import Dict, Tuple, Callable, Union, List
+from typing import Dict, Tuple, Callable, Union, List, Optional
 
 import jmespath
 from django.conf import settings
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.handlers.wsgi import WSGIRequest
-from graphene.test import Client
+
+# from graphene.test import Client
+from gql.transport.exceptions import TransportQueryError
 from graphene_django.tests.test_utils import client_query
 from graphene_django.utils.testing import GraphQLTestCase, graphql_query
 from graphene_file_upload.django.testing import GraphQLFileUploadTestMixin, file_graphql_query
+
+import gql
+from gql.client import AsyncClientSession
+from gql import Client as GQLClient
+from graphql import DocumentNode
+from gql.transport.async_transport import AsyncTransport
+
+import logging
+
+LOG = logging.getLogger(__name__)
 
 
 class FileToUpload(object):
@@ -21,7 +32,8 @@ class FileToUpload(object):
     Declarative way of a file to upload
     """
 
-    def __init__(self, filepath: str, file_variable_name: str, encoding: str = "utf8", name: str = None, content_type: str = None):
+    def __init__(self, filepath: str, file_variable_name: str, encoding: str = "utf8", name: str = None,
+                 content_type: str = None):
         self.filepath = filepath
         self.encoding = encoding
         self.name = name or os.path.basename(self.filepath)
@@ -37,7 +49,9 @@ class GraphQLRequestInfo(object):
     A class that syntethzie the graphql call the developer wants to test
     """
 
-    def __init__(self, graphql_query: str, graphql_operation_name: str = None, input_data: Dict[str, any] = None, headers: Dict[str, any] = None, graphql_variables: Dict[str, any] = None, files: List[FileToUpload] = None):
+    def __init__(self, graphql_query: str, graphql_operation_name: str = None, input_data: Dict[str, any] = None,
+                 headers: Dict[str, any] = None, graphql_variables: Dict[str, any] = None,
+                 files: List[FileToUpload] = None):
         self.query = graphql_query
         self.operation_name = graphql_operation_name
         self.input_data = input_data
@@ -51,11 +65,11 @@ class GraphQLResponseInfo(object):
     A class that synthetizes the rerequest-response the program has performed with a graphql server
     """
 
-    def __init__(self, request: GraphQLRequestInfo, response: WSGIRequest, content: Dict[str, any]):
+    def __init__(self, request: GraphQLRequestInfo, response: WSGIRequest, content: Dict[str, any], response_status_code: int):
         self.request = request
         self.response = response
         self.content = content
-
+        self.response_status_code = response_status_code
 
     def query_content(self, path: str) -> any:
         """
@@ -131,7 +145,6 @@ class GraphQLResponseInfo(object):
         return val
 
 
-
 GraphQLAssertionConstraint = Callable[[GraphQLResponseInfo], Tuple[bool, str]]
 """
 A constraint of assert_graphql_response_satisfy
@@ -149,13 +162,20 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
     A class allowing you to tst graphql queries
     """
 
-
     def graphql_url(self) -> str:
         """
-        Url of the graphql server to contact. Be **sure**
+        Url of the graphql server to contact. Be **sure** it exists. By default it goes to GRAPHQL_URL, if existent.
+        optheriwse, it returns graphql.
         :return:
         """
-        return "/graphql/"
+        return getattr(type(self), "GRAPHQL_URL", "/graphql/")
+
+    def graphql_client_timeout(self) -> Optional[int]:
+        """
+        Number of seconds to wait for the response of a grpahql server before giving it up
+        :return: If none there will be no timeout
+        """
+        return None
 
     @abc.abstractmethod
     def perform_authentication(self, **kwargs) -> any:
@@ -166,42 +186,82 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
         """
         pass
 
-    def query(
-        self, query: str, operation_name: str=None, input_data=None, variables=None, headers=None
-    ):
+    @abc.abstractmethod
+    def _setup_graphql_client(self, graphql_url: str) -> any:
         """
-        Args:
-            query (string)    - GraphQL query to run
-            operation_name (string)  - If the query is a mutation or named query, you must
-                                supply the op_name.  For annon queries ("{ ... }"),
-                                should be None (default).
-            input_data (dict) - If provided, the $input variable in GraphQL will be set
-                                to this value. If both ``input_data`` and ``variables``,
-                                are provided, the ``input`` field in the ``variables``
-                                dict will be overwritten with this value.
-            variables (dict)  - If provided, the "variables" field in GraphQL will be
-                                set to this value.
-            headers (dict)    - If provided, the headers in POST request to GRAPHQL_URL
-                                will be set to this value.
+        setup a the object that will be use to actually perform graphql queries to the server.
+        The function will be called the first time we needed to contact the grpahql server. So you can use this function
+        to setup the graphql client
 
-        Returns:
-            Response object from client
+        :param graphql_url: url part used to contact the graphql server
+        :return: any object which have the following method: post
         """
-        url = self.graphql_url()
-        if not url.startswith("/"):
-            url = "/" + url
-        if not url.endswith("/"):
-            url = url + "/"
+        pass
 
-        return graphql_query(
-            query,
-            operation_name=operation_name,
-            input_data=input_data,
-            variables=variables,
-            headers=headers,
-            client=self.client,
-            graphql_url=url,
-        )
+    @abc.abstractmethod
+    def _graphql_query(self,
+                       query: str,
+                       graphql_url: str,
+                       client: any,
+                       files: List[FileToUpload],
+                       operation_name: str = None,
+                       input_data: Dict[str, any] = None,
+                       variables: Dict[str, any] = None,
+                       headers: Dict[str, any] = None,
+
+                       ):
+        """
+        Actually perform the graphql query. Override this method if you need to customize the graphql test client.
+        Override this function to customize how the client (setupped in _setup_graphql_client) behaves when sending
+        data to the graphql server. By default this function assumes the test client is graphene-django.unit.testing.Client
+
+        Copied from graphene-django.unit.testing
+
+        :param query: GraphQL query to run
+        :param operation_name: If the query is a mutation or named query, you must
+            supply the op_name.  For annon queries ("{ ... }"),
+            should be None (default).
+        :param input_data: If provided, the $input variable in GraphQL will be set
+            to this value. If both ``input_data`` and ``variables``,
+            are provided, the ``input`` field in the ``variables``
+            dict will be overwritten with this value.
+        :param variables: If provided, the "variables" field in GraphQL will be
+            set to this value.
+        :param headers: If provided, the headers in POST request to GRAPHQL_URL
+            will be set to this value.
+        :param client: Test client
+        :param graphql_url: URL to graphql endpoint.
+        :returns: Response object from client
+        """
+        pass
+
+    @abc.abstractmethod
+    def _load_json_body_from_response(self, response: any) -> Dict[str, any]:
+        """
+        Fetch the graphql json response from the client. The default assume the usage of graphen-django.utils.testing.Client
+
+        :param response: response from the client used to connect to the graphql server
+        """
+        pass
+
+    @abc.abstractmethod
+    def _prepare_url(self, query: str, graphql_url: str) -> str:
+        """
+        Function that is used to prepare the url passed by the developer before feeding it in the graphql client.
+        This can be useful because sometimes you need to set a whole url, som other times only a url endpoint.
+
+        :param query: query involved
+        :param graphql_url: url to prepare
+        :return: url prepared
+        """
+        pass
+
+    @abc.abstractmethod
+    def _fetch_response_status_code_from_response(self, response: any) -> int:
+        """
+        Fetch the HTTP status code from the grpahql response
+        """
+        pass
 
     def perform_graphql_query(self, graphql_query_info: Union[GraphQLRequestInfo, str]) -> GraphQLResponseInfo:
         """
@@ -217,36 +277,36 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
                 graphql_query=graphql_query_info,
             )
 
-        if graphql_query_info.files is not None:
+        url = self.graphql_url()
+        url = self._prepare_url(graphql_query_info.query, url)
+
+        if self.client is None:
+            self.client = self._setup_graphql_client(graphql_url=url)
+
+        if graphql_query_info.files is None:
             files = []
-            for file_to_upload in graphql_query_info.files:
-                with open(os.path.abspath(file_to_upload.filepath), mode="rb") as f:
-                    content = f.read()
-                simple_uploaded_file = SimpleUploadedFile(name=file_to_upload.name, content=content, content_type=file_to_upload.content_type)
-                files.append(dict(file_to_upload=file_to_upload, simple_uploaded_file=simple_uploaded_file))
-
-            response = file_graphql_query(
-                query=graphql_query_info.query,
-                op_name=graphql_query_info.operation_name,
-                input_data=graphql_query_info.input_data,
-                variables=graphql_query_info.graphql_variables,
-                headers=graphql_query_info.headers,
-                files={d["file_to_upload"].file_variable_name:d["simple_uploaded_file"] for d in files},
-                graphql_url=self.graphql_url()
-            )
         else:
-            response = self.query(
-                query=graphql_query_info.query,
-                operation_name=graphql_query_info.operation_name,
-                input_data=graphql_query_info.input_data,
-                variables=graphql_query_info.graphql_variables,
-                headers=graphql_query_info.headers,
-            )
-        # load the reponse as a json
-        content = json.loads(response.content)
-        return GraphQLResponseInfo(graphql_query_info, response, content)
+            files = graphql_query_info.files
 
-    def perform_simple_upload_mutation(self, query: str, upload_filepath: str, upload_filepath_name: str = "test_file", content_type: str = "text/plain", upload_file_variable_name: str = "file", encoding: str="utf-8"):
+        response = self._graphql_query(
+            query=graphql_query_info.query,
+            operation_name=graphql_query_info.operation_name,
+            input_data=graphql_query_info.input_data,
+            variables=graphql_query_info.graphql_variables,
+            headers=graphql_query_info.headers,
+            graphql_url=url,
+            client=self.client,
+            files=files,
+        )
+
+        # load the reponse as a json
+        content = self._load_json_body_from_response(response)
+        status_code = self._fetch_response_status_code_from_response(response)
+        return GraphQLResponseInfo(graphql_query_info, response, content, status_code)
+
+    def perform_simple_upload_mutation(self, query: str, upload_filepath: str, upload_filepath_name: str = "test_file",
+                                       content_type: str = "text/plain", upload_file_variable_name: str = "file",
+                                       encoding: str = "utf-8"):
         """
         Contact an upload mutation and upload a single file
         :param query: graphql endpoint to contact
@@ -286,12 +346,15 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             graphql_query=str(mutation_body)
         ))
 
-    def assert_graphql_response_satisfy(self, graphql_response: GraphQLResponseInfo, constraint: GraphQLAssertionConstraint, check_success: bool = True):
+    def assert_graphql_response_satisfy(self, graphql_response: GraphQLResponseInfo,
+                                        constraint: GraphQLAssertionConstraint, check_success: bool = True):
         satisfied, error_message = constraint(graphql_response)
         if check_success:
             self.assert_graphql_response_noerrors(graphql_response)
         if not satisfied:
-            raise AssertionError(f"Error: {error_message}\nQuery:{graphql_response.request.query}\nVariables:{graphql_response.request.graphql_variables}")
+            raise AssertionError(f"""Error: {error_message}
+                Query:{graphql_response.request.query}
+                Variables:{graphql_response.request.graphql_variables}""")
 
     def assert_graphql_response_noerrors(self, graphql_response: GraphQLResponseInfo):
         """
@@ -306,8 +369,18 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             errors = ["Could not analyze graphql error section. Please try to directly invoke the request"]
 
         errors = '\n'.join(errors)
-        self.assertEqual(graphql_response.response.status_code, 200, f"""The graphql query HTTP status is not 200! Errors were:\n{errors}""")
-        self.assertNotIn("errors", list(graphql_response.content.keys()), graphql_response.content)
+        self.assertEqual(graphql_response.response_status_code, 200,
+                         f"""The graphql query HTTP status is not 200! Errors were:\n{errors}""")
+        # ensure errors are not present (or errors are presents but it is empty
+        if "errors" in list(graphql_response.content.keys()):
+            errors = graphql_response.content["errors"]
+            if errors is None:
+                pass
+            elif len(graphql_response.content["errors"]) == 0:
+                pass
+            else:
+                s = '\n'.join(map(str, graphql_response.content['errors']))
+                raise AssertionError(f"Errors are present in the response: \n{s}")
 
     def assert_graphql_response_error(self, graphql_response: GraphQLResponseInfo, expected_error_substring: str):
         """
@@ -316,6 +389,7 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
         :param graphql_response: reponse to inspect
         :param expected_error_substring: subsrting of the error to consider
         """
+
         def check(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             if "errors" not in aresponse.content:
                 return False, "response was successful, but we expected to have errors"
@@ -352,6 +426,7 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
         :raise AssertionError: if the check fails
         :see: https://jmespath.org/
         """
+
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             return jmespath.search(path, aresponse.content) is not None, f"path {path} does not exist in response!"
 
@@ -367,8 +442,30 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
         :raise AssertionError: if the check fails
         :see: https://jmespath.org/
         """
+
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             return jmespath.search(path, aresponse.content) is None, f"path {path} exists in the response"
+
+        self.assert_json_path_satisfies(graphql_response, criterion)
+
+    def assert_json_path_of_type(self, graphql_response: GraphQLResponseInfo, path: str,
+                                 allowed_type: Union[type, List[type]]):
+        """
+
+        :param graphql_response: object genrated by perform_graphql_query
+        :param path: a JSON path in the graphql response
+        :param allowed_type:either a single type or a list of types the value associated to the path may have
+        :raise AssertionError: if the data is not valid
+        :see: https://jmespath.org/
+        """
+
+        def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
+            nonlocal allowed_type
+            if not isinstance(allowed_type, list):
+                allowed_type = [allowed_type]
+            actual = jmespath.search(path, aresponse.content)
+            return type(
+                actual) in allowed_type, f"in path {path}: actual was of type {type(actual)} but only {', '.join(map(lambda x: x.__name__, allowed_type))} are allowed!"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
@@ -384,6 +481,7 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
         :raise AssertionError: if the check fails
         :see: https://jmespath.org/
         """
+
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = jmespath.search(path, aresponse.content)
             return actual == expected_value, f"in path {path}: actual == expected failed: {actual} != {expected_value}"
@@ -411,14 +509,16 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
-    def assert_json_path_greater_or_equal_to(self, graphql_response: GraphQLResponseInfo, path: str, expected_value: any):
+    def assert_json_path_greater_or_equal_to(self, graphql_response: GraphQLResponseInfo, path: str,
+                                             expected_value: any):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = jmespath.search(path, aresponse.content)
             return actual >= expected_value, f"in path {path}: actual >= expected failed: {actual} < {expected_value}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
-    def assert_json_path_less_than_or_equals_to(self, graphql_response: GraphQLResponseInfo, path: str, expected_value: any):
+    def assert_json_path_less_than_or_equals_to(self, graphql_response: GraphQLResponseInfo, path: str,
+                                                expected_value: any):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = jmespath.search(path, aresponse.content)
             return actual <= expected_value, f"in path {path}: actual <= expected failed: {actual} > {expected_value}"
@@ -428,18 +528,22 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
     def assert_json_path_str_equals_to(self, graphql_response: GraphQLResponseInfo, path: str, expected_value: any):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = str(jmespath.search(path, aresponse.content))
-            return actual == str(expected_value), f"in path {path}: str(actual) == str(expected) failed: {actual} != {expected_value}"
+            return actual == str(
+                expected_value), f"in path {path}: str(actual) == str(expected) failed: {actual} != {expected_value}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
     def assert_json_path_str_not_equals_to(self, graphql_response: GraphQLResponseInfo, path: str, expected_value: any):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = str(jmespath.search(path, aresponse.content))
-            return actual != str(expected_value), f"in path {path}: str(actual) != str(expected) failed: {actual} == {expected_value}"
+            return actual != str(
+                expected_value), f"in path {path}: str(actual) != str(expected) failed: {actual} == {expected_value}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
-    def assert_json_path_str_longer_than(self, graphql_response: GraphQLResponseInfo, path: str, minimum_length: int = None, maximum_length: int = None, min_included: bool = True, max_included: bool = False):
+    def assert_json_path_str_longer_than(self, graphql_response: GraphQLResponseInfo, path: str,
+                                         minimum_length: int = None, maximum_length: int = None,
+                                         min_included: bool = True, max_included: bool = False):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             nonlocal minimum_length, maximum_length
             actual = str(jmespath.search(path, aresponse.content))
@@ -458,17 +562,21 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
-    def assert_json_path_str_contains_substring(self, graphql_response: GraphQLResponseInfo, path: str, expected_substring: str):
+    def assert_json_path_str_contains_substring(self, graphql_response: GraphQLResponseInfo, path: str,
+                                                expected_substring: str):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = str(jmespath.search(path, aresponse.content))
-            return str(expected_substring) in actual, f"in path {path}: expected in actual failed: {expected_substring} not in {actual}"
+            return str(
+                expected_substring) in actual, f"in path {path}: expected in actual failed: {expected_substring} not in {actual}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
-    def assert_json_path_str_does_not_contain_substring(self, graphql_response: GraphQLResponseInfo, path: str, expected_substring: str):
+    def assert_json_path_str_does_not_contain_substring(self, graphql_response: GraphQLResponseInfo, path: str,
+                                                        expected_substring: str):
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             actual = str(jmespath.search(path, aresponse.content))
-            return str(expected_substring) not in actual, f"in path {path}: expected is indeed in actual, but we needed not to: {expected_substring} not in {actual}"
+            return str(
+                expected_substring) not in actual, f"in path {path}: expected is indeed in actual, but we needed not to: {expected_substring} not in {actual}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
@@ -488,7 +596,9 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
-    def assert_json_path_obj_dynamic_method(self, graphql_response: GraphQLResponseInfo, path: str, method_name: str, args: List[any], kwargs: Dict[str, any], expected_result: any, comparison_function: Callable[[any, any], any] = None):
+    def assert_json_path_obj_dynamic_method(self, graphql_response: GraphQLResponseInfo, path: str, method_name: str,
+                                            args: List[any], kwargs: Dict[str, any], expected_result: any,
+                                            comparison_function: Callable[[any, any], any] = None):
         """
         Use this assertion to test the output of a instance method of the return value generated by jmespath path.
 
@@ -506,6 +616,7 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
         :param expected_result: the result we hope to have
         :param comparison_function: a function that is used to compare the result of the method name (first argument) with the expected result (second argument). If left missing, it is the "operator.eq" between the actual and the expected
         """
+
         def criterion(aresponse: GraphQLResponseInfo) -> Tuple[bool, str]:
             # actual may be a list, str, int
             actual = jmespath.search(path, aresponse.content)
@@ -514,14 +625,15 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             if not hasattr(actual, method_name):
                 return False, f"in path {path}: The object pointed by the path is of type {type(actual)}, which does not have a method called {method_name}"
             actual_method = getattr(actual, method_name)
-            actual_result = actual_method(actual, *args, **kwargs)
+            actual_result = actual_method(*args, **kwargs)
             args_str = ', '.join(args)
             kwargs_str = ', '.join(map(lambda i: f"{i[0]}={i[1]}", kwargs.items()))
 
             nonlocal comparison_function
             if comparison_function is None:
                 comparison_function = operator.eq
-            return comparison_function(actual_result, expected_result), f"in path {path}: the <{type(actual)}>.{method_name}({args_str}, {kwargs_str}) yielded {actual_result}; however, we expected to be {expected_result}"
+            return comparison_function(actual_result,
+                                       expected_result), f"in path {path}: the <{type(actual)}>.{method_name}({args_str}, {kwargs_str}) yielded {actual_result}; however, we expected to be {expected_result}"
 
         self.assert_json_path_satisfies(graphql_response, criterion)
 
@@ -632,31 +744,12 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             comparison_function=operator.ne
         )
 
-    def assert_json_path_to_be_gt_length(self, graphql_response: GraphQLResponseInfo, path: str, expected_result: int):
-        """
-        Assert an array ot be of at least a (non included) determinated length length
-
-        :param graphql_response: response top analyze
-        :param path: path to consider
-        :param expected_result: result of the length comparison
-        """
-        self.assert_json_path_obj_dynamic_method(
-            graphql_response=graphql_response,
-            path=path,
-            method_name="__len__",
-            args=[],
-            kwargs={},
-            expected_result=expected_result,
-            comparison_function=operator.gt
-        )
-
     def assert_json_path_to_be_nonzero_length(self, graphql_response: GraphQLResponseInfo, path: str):
         """
         Assert an array to have at least one element
 
         :param graphql_response: response top analyze
         :param path: path to consider
-        :param expected_result: result of the length comparison
         """
         self.assert_json_path_obj_dynamic_method(
             graphql_response=graphql_response,
@@ -674,7 +767,6 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
 
         :param graphql_response: response top analyze
         :param path: path to consider
-        :param expected_result: result of the length comparison
         """
         self.assert_json_path_obj_dynamic_method(
             graphql_response=graphql_response,
@@ -686,7 +778,8 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             comparison_function=operator.eq
         )
 
-    def assert_json_path_to_be_in_range(self, graphql_response: GraphQLResponseInfo, path: str, lb, ub, lb_included: bool = True, ub_included: bool = False):
+    def assert_json_path_to_be_in_range(self, graphql_response: GraphQLResponseInfo, path: str, lb, ub,
+                                        lb_included: bool = True, ub_included: bool = False):
         """
         Assert an array of the actual result to be ioncluded in one of a range of type [a,b], [a,b[, ]a,b] or ]a,b[
         If we consider floats, we consider the number plus/minus the epsilon
@@ -696,7 +789,7 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
         :param lb: lowerbound fo the range
         :param ub: upperbound of the range
         :param lb_included: if true, the "lb" is included in the range (i.e., "[" bracket)
-        :param lb_included: if true, the "ub" is included in the range (i.e., "]" bracket)
+        :param ub_included: if true, the "ub" is included in the range (i.e., "]" bracket)
         """
 
         def compare_range(x, tpl) -> bool:
@@ -744,7 +837,7 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             os.getcwd()
         cwd = os.path.abspath(cwd)
         for path in os.listdir(cwd):
-            if os.path.isfile(os.path.join(cwd,path)):
+            if os.path.isfile(os.path.join(cwd, path)):
                 if re.search(regex, path) is not None:
                     return True
         else:
@@ -762,7 +855,7 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             os.getcwd()
         cwd = os.path.abspath(cwd)
         for path in os.listdir(cwd):
-            if os.path.isfile(os.path.join(cwd,path)):
+            if os.path.isfile(os.path.join(cwd, path)):
                 if re.match(regex, path) is not None:
                     return True
         else:
@@ -799,5 +892,212 @@ class AbstractGraphQLTestMixin(GraphQLFileUploadTestMixin, abc.ABC):
             if os.path.isfile(os.path.join(cwd, path)):
                 if re.match(regex, path) is not None:
                     raise AssertionError(f"the file {path} under {cwd} has the search regex {regex}!")
+
+    def assert_string_contains(self, substring: str, actual: str, message: str = None):
+        """
+        Ensure that a string contains a substring
+        :param substring: substring to check
+        :param actual: string got
+        :param message: emssage to show if the assertion fails
+        """
+        if substring not in actual:
+            raise AssertionError(f"""'{substring}' is not in '{actual}': {message or ''}""")
+
+    def assert_string_not_contains(self, substring: str, actual: str, message: str = None):
+        """
+        Ensure that a string does not contain a specified substring
+        :param substring: substring to check
+        :param actual: string got
+        :param message: message to show if the assertion fails
+        """
+        if substring in actual:
+            raise AssertionError(f"""'{substring}' is in '{actual}': {message or ''}""")
+
+
+class GrapheneClientTestMixIn:
+    """
+    A mixin that support AbstractGraphQLTestMixin allowing you to u8se the standard graphene-django Client graphql test
+    client
+    """
+
+    def _setup_graphql_client(self, graphql_url: str) -> any:
+        from django.test.client import Client
+        return Client()
+
+    def _prepare_url(self, query: str, graphql_url: str) -> str:
+        if not graphql_url.startswith("/"):
+            graphql_url = "/" + graphql_url
+        if not graphql_url.endswith("/"):
+            graphql_url = graphql_url + "/"
+        return graphql_url
+
+    def _graphql_query(self,
+                       query: str,
+                       graphql_url: str,
+                       client: any,
+                       files: List[FileToUpload],
+                       operation_name: str = None,
+                       input_data: Dict[str, any] = None,
+                       variables: Dict[str, any] = None,
+                       headers: Dict[str, any] = None,
+                       ):
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        if len(files) > 0:
+            files_dicts = []
+            for file_to_upload in files:
+                with open(os.path.abspath(file_to_upload.filepath), mode="rb") as f:
+                    content = f.read()
+                simple_uploaded_file = SimpleUploadedFile(name=file_to_upload.name, content=content,
+                                                          content_type=file_to_upload.content_type)
+                files_dicts.append(dict(file_to_upload=file_to_upload, simple_uploaded_file=simple_uploaded_file))
+
+            response = file_graphql_query(
+                query=query,
+                op_name=operation_name,
+                input_data=input_data,
+                variables=variables,
+                headers=headers,
+                files={d["file_to_upload"].file_variable_name: d["simple_uploaded_file"] for d in files_dicts},
+                graphql_url=graphql_url,
+                client=client
+            )
+        else:
+            response = graphql_query(
+                query=query,
+                operation_name=operation_name,
+                input_data=input_data,
+                variables=variables,
+                headers=headers,
+                client=client,
+                graphql_url=graphql_url
+            )
+
+        return response
+
+    def _load_json_body_from_response(self, response: any) -> Dict[str, any]:
+        return json.loads(response.content)
+
+    def _fetch_response_status_code_from_response(self, response: any) -> int:
+        return response.status_code
+
+
+class AsyncClientEnhancedSession(AsyncClientSession):
+
+    async def execute(self, document: DocumentNode, *args, **kwargs) -> Dict:
+        """
+        Copied from AsyncClientSession class. We do not only return result.data, but the whole result paylaod
+        """
+
+        # Validate and execute on the transport
+        result = await self._execute(document, *args, **kwargs)
+
+        # Raise an error if an error is returned in the ExecutionResult object
+        if result.errors:
+            raise TransportQueryError(
+                str(result.errors[0]), errors=result.errors, data=result.data
+            )
+
+        assert (
+            result.data is not None
+        ), "Transport returned an ExecutionResult without data or errors"
+
+        return result
+
+
+class GQLEnhancedClient(GQLClient):
+
+    async def __aenter__(self):
+        # code pasted from Client
+        assert isinstance(
+            self.transport, AsyncTransport
+        ), "Only a transport of type AsyncTransport can be used asynchronously"
+
+        await self.transport.connect()
+
+        if not hasattr(self, "session"):
+            self.session = AsyncClientEnhancedSession(client=self)
+
+        # Get schema from transport if needed
+        if self.fetch_schema_from_transport and not self.schema:
+            await self.session.fetch_schema()
+
+        return self.session
+
+
+class RealGraphQLClientMixIn:
+    """
+    A mixin to support AbstractGraphQLTestMixIn that provides a real graphql client implementation (thus you will make
+    actual http calls).
+
+    If you are using this mixin, GRAPHQL_URl needs to be setup as the whole url to contact (with port and hostname)
+
+    :see: https://docs.djangoproject.com/en/3.2/topics/testing/tools/#overview-and-a-quick-example
+    """
+
+    def _setup_graphql_client(self, graphql_url: str) -> any:
+        return None
+
+    def _prepare_url(self, query: str, graphql_url: str) -> str:
+        if not graphql_url.endswith("/"):
+            graphql_url = graphql_url + "/"
+        return graphql_url
+
+    def _graphql_query(self,
+                       query: str,
+                       graphql_url: str,
+                       client: any,
+                       operation_name: str = None,
+                       input_data: Dict[str, any] = None,
+                       variables: Dict[str, any] = None,
+                       headers: Dict[str, any] = None,
+                       files: List[FileToUpload] = None
+                       ):
+        from gql import gql
+        from gql import Client as GQLClient
+        from gql.transport.aiohttp import AIOHTTPTransport
+
+        transport = AIOHTTPTransport(url=graphql_url, headers=headers)
+        client = GQLEnhancedClient(
+            transport=transport,
+            fetch_schema_from_transport=True,
+        )
+        client.execute_timeout = self.graphql_client_timeout()
+
+        files_opened = []
+        try:
+            upload_files = len(files) > 0
+            if upload_files:
+                # we need to add to the variable_values the files pointers as well
+                for file_to_upload in files:
+                    if file_to_upload.file_variable_name in variables:
+                        raise ValueError(
+                            f"variable name and file name are the same. Name involved: {file_to_upload.file_variable_name}")
+                    fp = open(os.path.abspath(file_to_upload.filepath), mode="rb")
+                    file_to_upload.append(fp)
+                    variables[file_to_upload.file_variable_name] = fp
+
+            gql_query = gql(query)
+            LOG.info(f"Sending graphQL request...")
+            LOG.info(f"url: {graphql_url}")
+            LOG.info(f"data: {query}")
+            result = client.execute(gql_query, variable_values=variables, upload_files=upload_files)
+        finally:
+            # close the files
+            for fp in files_opened:
+                fp.close()
+
+        # format error
+        result = result.formatted
+        LOG.info(f"Response is {result}")
+        return result
+
+    def _load_json_body_from_response(self, response: any) -> Dict[str, any]:
+        return response
+
+    def _fetch_response_status_code_from_response(self, response: any) -> int:
+        # TODO assume 200, since we have no way to fetch the correct http status code
+        return 200
 
 

@@ -84,8 +84,24 @@ def get_unique_field_names(django_type: type) -> Iterable[models.Field]:
     :param django_type: model to inspect
     """
     for f in django_type._meta.get_fields():
-        if not f.unique:
+        if f.is_relation:
+            continue
+        if f.unique:
             yield f
+
+
+def get_first_unique_field_value(model_instance: models.Model) -> any:
+    """
+    Get the value of  the first field in the model that is unique
+
+    :param model_instance: instance of a model
+    :return: unique field
+    """
+    for f in model_instance._meta.get_fields():
+        if f.is_relation:
+            continue
+        if f.unique:
+           return getattr(model_instance, f.name)
 
 
 def get_salt_from_password_field(password_field_value: str) -> str:

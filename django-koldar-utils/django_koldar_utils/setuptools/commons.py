@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import List, Iterable, Dict
 
+import pkg_resources
 import stringcase
 from semantic_version import Version
 from setuptools import Distribution, Command, find_packages, setup
@@ -155,7 +156,7 @@ class AbstractScriptSetup(abc.ABC):
 
     def __init__(self, author: str, author_mail: str, description: str, keywords: List[str], home_page: str,
                       python_minimum_version: str, license_name: str, main_package: str, classifiers: List[str] = None,
-                      package_data: str = "package_data", required_dependencies: List[str] = None, scripts: List[str] = None):
+                      package_data: str = "package_data", required_dependencies: List[str] = None, scripts: List[str] = None, test_dependencies: List[str] = None, doc_dependencies: List[str] = None):
         self.author = author
         self.author_mail = author_mail
         self.description = description
@@ -168,6 +169,8 @@ class AbstractScriptSetup(abc.ABC):
         self.main_package = main_package
         self.package_data = package_data
         self.scripts = scripts
+        self.test_dependencies = test_dependencies or []
+        self.doc_dependencies = doc_dependencies or []
 
     def get_name(self) -> str:
         return stringcase.spinalcase(self.main_package)
@@ -217,8 +220,13 @@ class AbstractScriptSetup(abc.ABC):
             return IncreaseMinorVersion(dist=NoopDistribution()).update_version()
         elif "update_version_major" in sys.argv:
             return IncreaseMajorVersion(dist=NoopDistribution()).update_version()
+        if "patch_version" in sys.argv:
+            return IncreasePatchVersion(dist=NoopDistribution()).update_version()
+        elif "minor_version" in sys.argv:
+            return IncreaseMinorVersion(dist=NoopDistribution()).update_version()
+        elif "major_version" in sys.argv:
+            return IncreaseMajorVersion(dist=NoopDistribution()).update_version()
         else:
-
             version_file = AbstractHandleVersion.get_file_version()
             return str(AbstractHandleVersion.read_version(version_file))
 
@@ -227,21 +235,72 @@ class AbstractScriptSetup(abc.ABC):
             filename = "requirements.txt"
         else:
             filename = f"requirements-{domain}.txt"
+
         if os.path.exists(filename):
             with open(filename, "r", encoding="utf-8") as fh:
-                for dep in fh.readlines():
-                    dep_name = dep.split("==")[0]
-                    dep_version = dep.split("==")[1].strip()
-                    yield dep_name + ">=" + dep_version
+                for dep in pkg_resources.parse_requirements(fh):
+                    # we need to replace a==3 with a>=3. Other requirements are skipped
+                    if len(dep.specs) == 1 and dep.specs[0][0] == "==":
+                        yield dep.unsafe_name + ">=" + dep.specs[0][1]
+                    else:
+                        yield str(dep)
+                # for dep in fh.readlines():
+                #     # a requirement may not be simply a==0.0.1
+                #     dep_name = dep.split("==")[0]
+                #     dep_version = dep.split("==")[1].strip()
+                #     yield dep_name + ">=" + dep_version
 
     def get_scripts(self) -> List[str]:
         return self.scripts or []
+
+    def get_long_description(self) -> str:
+        readme_name = 'README.md'
+        if os.path.exists(readme_name):
+            # developer has a readme file encoded in markdown. We need to convert it first into rst
+            from m2r import convert
+            text = self.read_file_content('README.md')
+            rst_string = convert(text)
+            return rst_string
+        else:
+            return "<no readme found>"
+
+    def get_long_description_content_type(self) -> str:
+        readme_name = 'README.md'
+        if os.path.exists(readme_name):
+            return "text/markdown"
+        else:
+            return "text/plain"
+
+    def get_license_name(self) -> str:
+        return "LICEN[SC]E*.md"
+
+    def get_docs_requirements(self, section_name: str) -> List[str]:
+        result = [
+            "sphinx",
+            "sphinx-rtd-theme",
+        ]
+        result.extend(self.doc_dependencies)
+        return result
+
+    def get_test_requirements(self, section_name: str) -> List[str]:
+        result = [
+            "pytest",
+            "mock",
+        ]
+        result.extend(self.test_dependencies)
+        return result
+
+    def get_other_extra_requirements(self) -> Dict[str, List[str]]:
+        return {}
 
     def perform_setup(self, **kwargs):
         cmdclass = {
             'update_version_patch': IncreasePatchVersion,
             'update_version_minor': IncreaseMinorVersion,
             'update_version_major': IncreaseMajorVersion,
+            'patch_version': IncreasePatchVersion,
+            'minor_version': IncreaseMinorVersion,
+            'major_version': IncreaseMajorVersion,
             'push_tag': PushTagCommand,
         }
 
@@ -260,13 +319,18 @@ class AbstractScriptSetup(abc.ABC):
             keywords=self.keywords,
             url=self.home_page,
             packages=find_packages(),
-            long_description=self.read_file_content('README.md'),
-            long_description_content_type="text/markdown",
+            long_description=self.get_long_description(),
+            long_description_content_type=self.get_long_description_content_type(),
             classifiers=self.get_classifiers(),
-            license_files="LICEN[SC]E*.md",
+            license_files=self.get_license_name(),
             # REQUIREMENTS
             python_requires=self.get_python_requires(),
             install_requires=self.get_install_requires(),
+            extras_require={
+                "docs": self.get_docs_requirements("docs"),
+                "test": self.get_test_requirements("test"),
+                **self.get_other_extra_requirements(),
+            },
             # NON PYTHON DATA
             include_package_data=True,
             package_data=self.get_package_data(),

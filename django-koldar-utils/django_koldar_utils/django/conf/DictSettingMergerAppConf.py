@@ -34,8 +34,21 @@ class DictSettingMergerAppConf(AppConf):
         prefix = getattr(self, "Meta").prefix
         if not hasattr(settings, prefix):
             return self.configured_data
+
+        # the data the user has written in the settings.py
         data_in_settings = getattr(settings, prefix)
-        for class_attribute_name, class_attribute_value in self.configured_data.items():
-            if class_attribute_name in data_in_settings:
-                self.configured_data[class_attribute_name] = data_in_settings[class_attribute_name]
-        return self.configured_data
+        # the data in the AppConf instance specyfing default values
+        default_data = dict(self.configured_data)
+        result = dict()
+
+        # specify settings which do not have default values in the conf.py
+        # (thus are requried) with the values specified in the settings.py
+        for class_attribute_name, class_attribute_value in data_in_settings.items():
+            result[class_attribute_name] = data_in_settings[class_attribute_name]
+
+        # overwrite settings which have default values
+        # with the values specified in the settings.py
+        for class_attribute_name, class_attribute_value in default_data.items():
+            if class_attribute_name not in result:
+                result[class_attribute_name] = default_data[class_attribute_name]
+        return result

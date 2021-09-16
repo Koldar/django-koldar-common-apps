@@ -36,8 +36,12 @@ class ArrowField(models.DateTimeField):
         """
         Convert a python object into something that can be serialized into the database
         """
-        if value:
+        if isinstance(value, datetime.datetime):
+            return value
+        elif isinstance(value, Arrow):
             return value.datetime
+        elif isinstance(value, str):
+            return arrow.get(value).datetime
         else:
             return None
 

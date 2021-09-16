@@ -95,7 +95,7 @@ def create_schema():
         LOG.info(f"Building graphQL schema with federation support")
         schema = graphene_federation.build_schema(query=Query, mutation=Mutation)
     else:
-        LOG.info(f"Building graphQL schema without federatio nsupport")
+        LOG.info(f"Building graphQL schema without federation support")
         schema = graphene.Schema(query=Query, mutation=Mutation)
 
     if settings.SAVE_GRAPHQL_SCHEMA is not None:

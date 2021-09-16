@@ -56,6 +56,7 @@ def send_json_and_return_json(url: str, http_method: str, json_body: Union[str, 
         params=url_params,
         headers=headers
     )
+    LOG.info(f"the endpoint {url} repied with {response.status_code}")
     return response.status_code, response.json()
 
 

@@ -3,6 +3,7 @@ from django_currentuser.db.models import CurrentUserField
 
 from django_koldar_utils.django.Orm import Orm
 from django_koldar_utils.django.fields.ArrowField import ArrowField
+from django_koldar_utils.django.models.mixins.ActiveMixIn import ActiveMixIn
 
 
 class ArrowAuditMixIn(models.Model):
@@ -15,6 +16,5 @@ class ArrowAuditMixIn(models.Model):
 
     created_at = ArrowField(auto_now_add=True, help_text="Time when the row has been created")
     updated_at = ArrowField(auto_now=True, help_text="Latest time when the row has been updated")
-    active = models.BooleanField(default=True, help_text="If set, the row should be included in whatever queryset generated")
     created_by = CurrentUserField(related_name=Orm.DO_NOT_CREATE_INVERSE_RELATION, help_text="User that has created this row")
     updated_by = CurrentUserField(related_name=Orm.DO_NOT_CREATE_INVERSE_RELATION, on_update=True, help_text="User that has performed the last operation on this row")

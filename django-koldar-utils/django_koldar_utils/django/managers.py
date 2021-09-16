@@ -1,6 +1,8 @@
 import abc
-from typing import TypeVar, Generic, Optional
+import uuid
+from typing import TypeVar, Generic, Optional, List
 
+import stringcase
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import UserManager
 from django.db import models
@@ -10,7 +12,10 @@ from polymorphic.managers import PolymorphicManager
 TMODEL = TypeVar("TMODEL")
 
 
-class IManager(abc.ABC):
+class AbstractManagerMeta(abc.ABCMeta, type(models.Manager)):
+    pass
+
+class IManager(models.Manager, metaclass=AbstractManagerMeta):
 
     @property
     def model_class(self) -> type:
@@ -86,6 +91,14 @@ class IManager(abc.ABC):
         except self.MultipleObjectsReturned:
             raise self.MultipleObjectsReturned(f"there are multiple {self.model_class.__name__} with values {kwargs}!")
 
+    def find_only_or_none(self, **kwargs) -> Optional[TMODEL]:
+        """
+        Alias of :find_only_or_None:
+        :param kwargs: kwargs that will be injected into filter or get.
+        :return: the only row satisfying the filter or None if there are multiple rows or none of them.
+        """
+        return self.find_only_or_None(**kwargs)
+
     def find_only_or_None(self, **kwargs) -> Optional[TMODEL]:
         """
         Find the only entry in the model. If there is not or there are multiple, return None
@@ -98,6 +111,41 @@ class IManager(abc.ABC):
             return None
 
 
+class OnlyActiveManagerMixIn(models.Manager):
+    """
+    A mixin that should be attach only to a django manager.
+    With this, the manager is now capable to consider only rows whose active field (assumed to be boolean) is True.
+    The name of the active field to consider is specified by active_field_name.
+
+    If the model does not contains an "active" flag, we will do nothing. If you know that active flag is
+    present, consider setting ASSUME_ACTIVE_IS_PRESENT to improve performances
+
+    You can further customize the mixin by manually setting ACTIVE_FLAG_NAME flag (in combo with
+    create_manager_instance_with_class_attribute)
+    """
+
+    ACTIVE_FLAG_NAME = "active"
+    ASSUME_ACTIVE_IS_PRESENT = False
+
+    def active_field_name(self) -> str:
+        return OnlyActiveManagerMixIn.ACTIVE_FLAG_NAME
+
+    def assume_active_is_present(self) -> bool:
+        return OnlyActiveManagerMixIn.ASSUME_ACTIVE_IS_PRESENT
+
+    def get_queryset(self):
+        if self.assume_active_is_present() or hasattr(self.model, self.active_field_name()):
+            return super(models.Manager, self).get_queryset().filter(**{self.active_field_name(): True})
+        else:
+            return super(models.Manager, self).get_queryset()
+
+    def _get(self, *args, **kwargs):
+        if self.assume_active_is_present() or hasattr(self.model, self.active_field_name()):
+            kwargs = dict(kwargs)
+            kwargs[self.active_field_name()] = True
+        return super().get_queryset().get(*args, **kwargs)
+
+
 #todo readd Generic[TMODEL],
 class ExtendedPolymorphicManager(IManager, PolymorphicManager):
 
@@ -106,76 +154,75 @@ class ExtendedPolymorphicManager(IManager, PolymorphicManager):
 
 
 #todo readd Generic[TMODEL],
-class ExtendedManager(IManager, models.Manager):
+class ExtendedManager(IManager, OnlyActiveManagerMixIn):
     """
     A manager which provides common utilities.
     If you use this manager, we automatically filter out inactive entries.
     Inactive entries are detected via the field name "active_field_name"
     """
 
-    def active_field_name(self) -> str:
-        return "active"
-
-    def get_queryset(self):
-        return super().get_queryset().filter(**{self.active_field_name(): True})
-
     def _get(self, *args, **kwargs):
-        kwargs = dict(kwargs)
-        kwargs[self.active_field_name()] = True
-        return super().get_queryset().get(*args, **kwargs)
+        return OnlyActiveManagerMixIn._get(self, *args, **kwargs)
 
 
 #todo readd Generic[TMODEL],
-class ExtendedUserManager(IManager, UserManager):
+class ExtendedUserManager(UserManager, IManager, OnlyActiveManagerMixIn):
     """
     Extension of the UserManager implementation.
     If you use this manager, we automatically filter out inactive entries.
     Inactive entries are detected via the field name "active_field_name"
     """
 
-    def active_field_name(self) -> str:
-        return "active"
-
-    def get_queryset(self):
-        return super().get_queryset().filter(**{self.active_field_name(): True})
-
     def _get(self, *args, **kwargs):
-        kwargs = dict(kwargs)
-        kwargs[self.active_field_name()] = True
-        return super().get_queryset().get(*args, **kwargs)
+        return OnlyActiveManagerMixIn._get(self, *args, **kwargs)
 
 
-class AbstractOnlyActiveManager(models.Manager, abc.ABC):
+def create_manager_instance_with_class_attribute(base_classes: List[type], **kwargs) -> models.Manager:
     """
-    A manager that consider only rows whose active field is True.
-    The name of the active field to consider is specified by active_field_name
+    Create a new class representing a manager where you can specify some class attributes.
+    This is useful because in this way you can pass arguments to a manager.
+
+    A downside is that we create an "anonymous" manager (its name is gibberish
+
+    :see: https://stackoverflow.com/a/39147144
     """
-    @abc.abstractmethod
-    def active_field_name(self) -> str:
-        pass
+    new_uuid = uuid.uuid4()
 
-    def get_queryset(self):
-        return super().get_queryset().filter(**{self.active_field_name(): True})
+    result = type(
+        f"CustomManager{stringcase.snakecase(new_uuid)}",
+        (models.Manager, *base_classes),
+        {
+            **kwargs
+        }
+    )
+    return result()
 
 
-class StandardOnlyActiveManager(AbstractOnlyActiveManager):
+def create_extended_manager(**kwargs):
+    """
+    Create an extended manager that you can customize. The kwargs are the same the ones in OnlyActiveManagerMixIn
+    """
+    return create_manager_instance_with_class_attribute(
+        base_classes=[IManager, OnlyActiveManagerMixIn],
+        **kwargs
+    )
+
+
+class StandardOnlyActiveManager(OnlyActiveManagerMixIn):
     """
     A manager that consider only rows whose actve field is True.
     The name of the field is hardcoded to be "active"
     """
 
-    def active_field_name(self) -> str:
-        return "active"
+    ACTIVE_FLAG_NAME = "active"
 
 
-class StandardOnlyIsActiveManager(AbstractOnlyActiveManager):
+class StandardOnlyIsActiveManager(OnlyActiveManagerMixIn):
     """
     A manager that consider only rows whose actve field is True.
     The name of the field is hardcoded to be "is_active"
     """
-
-    def active_field_name(self) -> str:
-        return "is_active"
+    ACTIVE_FLAG_NAME = "is_active"
 
 
 

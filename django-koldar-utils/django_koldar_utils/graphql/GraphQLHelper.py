@@ -1,20 +1,30 @@
 import abc
 from typing import List, Tuple, Dict, Any, Callable, Union, Optional
 
+import inspect
 import graphene
+import graphene_django
 import inflect as inflect
 import stringcase
 import logging
+
+from django.db.models import QuerySet
+from graphene import Field
+from graphene.types.mountedtype import MountedType
 
 from django_koldar_utils.django import filters_helpers, django_helpers, permissions_helpers, auth_decorators
 from django_koldar_utils.functions import python_helpers
 from django_koldar_utils.graphql import graphql_decorators, error_codes
 from django_koldar_utils.graphql.GraphQLAppError import GraphQLAppError
+from django_koldar_utils.graphql.graphql_types import TDjangoModelType, TGrapheneType, TGrapheneArgument, \
+    TGrapheneReturnType, TGrapheneQuery
+from django_koldar_utils.graphql.scalars.ArrowDateScalar import ArrowDateScalar
+from django_koldar_utils.graphql.scalars.ArrowDateTimeScalar import ArrowDateTimeScalar
+from django_koldar_utils.graphql.scalars.ArrowDurationScalar import ArrowDurationScalar
 
 MUTATION_FIELD_DESCRIPTION = "Mutation return value. Do not explicitly use it."
 """
 A prefix to put to every mutation return value"""
-
 
 LOG = logging.getLogger(__name__)
 
@@ -77,7 +87,8 @@ class ICrudOperationNamer(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key: str, django_filter_type: type) -> Optional[
+    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key: str,
+                                                         django_filter_type: type) -> Optional[
         str]:
         """
         fetch the name corresponding to the return value of read single by primary key mutation
@@ -136,7 +147,8 @@ class StandardCrudOperationNamer(ICrudOperationNamer):
     Default implementation generating standard CRUD names
     """
 
-    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key_name: str, django_filter_instance) -> Optional[
+    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key_name: str,
+                                                         django_filter_instance) -> Optional[
         str]:
         return None
 
@@ -197,7 +209,8 @@ class NamespacedCrudOperationNamer(ICrudOperationNamer):
     def get_read_single_by_primary_key_name(self, django_type: type, primary_key_name: str) -> Optional[str]:
         return f"Get{self.prefix}{django_type.__name__}By{stringcase.pascalcase(primary_key_name)}{self.suffix}"
 
-    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key_name: str, django_filter_type: type) -> Optional[str]:
+    def get_read_single_by_primary_key_return_value_name(self, django_type: type, primary_key_name: str,
+                                                         django_filter_type: type) -> Optional[str]:
         return f"{self.prefix}{django_type.__name__}By{stringcase.pascalcase(primary_key_name)}{self.suffix}"
 
     def get_update_name(self, django_type: type) -> Optional[str]:
@@ -222,192 +235,29 @@ class FederationCrudOperationNamer(NamespacedCrudOperationNamer):
         super().__init__(prefix=namespace, suffix="")
 
 
-class IAddRemoveElementGraphql(abc.ABC):
-    """
-    A class that generates classes representing graphql queries adding adn removing items from a relationship.
-    Relationship can
-    """
-
-
-    def generate(self, django_list_owner_type: type, django_element_type: type,
-          graphene_element_input_type: type, relation_name: str,
-          manager_for_the_list: str, fields_to_check: List[str],
-          mutation_class_name: str = None,
-          description: Union[str, Callable[[str], str]] = None,
-          active_flag_name: str = None, input_name: str = None,
-          output_name: str = None, add_if_not_present: bool = False,
-          old_length_output_name: str = None, new_length_output_name: str = None,
-          added_output_name: str = None, created_output_name: str = None,
-          additional_mutation_inputs: Dict[str, any] = None):
-        """
-        :param django_list_owner_type: django type owning a list of items of type django_element_owner_type
-        :param django_element_type: django type of the array of list
-        :param relation_name: name of the relationship represented by the list
-        :param description: description of the grpahql mutation. If it is a callable, the first argument is the default description.
-        :param graphene_element_input_type: graphene type representing a single cell in the list owned by django_list_owner_type. The type represents a graphql input type.
-        :param fields_to_check: list fo fields in the mutation graphene input that we need to check to determine if the object to add is already been
-            added to the collection. If all the fields are equal, we will declare that the object is already added in the collection.
-            If left missing, it is the list of all the unique fields of django_element_type
-        :param manager_for_the_list: name of the variable of django_list_owner_type allowing you to gain access to the list of objects associated with the relation relation_name.
-        :param add_if_not_present: if this variable is set to True, if the user add a non persisteed django_element_type instance as the input of the mutation,
-            we will first persist such an object
-        :param input_name: name of the mutation argument containing the element to add in the relationship
-        :param output_name: name of the mutation argument containing the element just added in the relationship
-        :param old_length_output_name: name of the mutation output containign the number of element in the collection before the element was added
-        :param new_length_output_name: name of the mutation output containing the number of element in the collection after the element was added
-        :param added_output_name: name of the mutation output containing true if we have added a new element in the collection, false otherwise
-        :param created_output_name: name of the mutation output containing true if we have created a new element in the database before adding it in the collection, false otherwise
-        :param additional_mutation_inputs: dictionary of additional mutatation input you want to add in the generating mutation
-        :reutrn: type representing this add element to list mutation
-        """
-        if mutation_class_name is None:
-            mutation_class_name = f"Add{django_element_type.__name__}To{relation_name}Of{django_list_owner_type.__name__}"
-        if description is None:
-            if add_if_not_present:
-                not_present = "We will persist it first by creating the object"
-            else:
-                not_present = "We will raise exception"
-            dsc = f"""Allows to add a new element of type {django_element_type.__name__} to the list owned
-                by class {django_list_owner_type.__name__} associated with the relation \"{relation_name}\". If an element
-                is already within such a list we do nothing. If the element input is not already persisted in the database (i.e., the input has an id not null), {not_present}. 
-                If the item to add has the active flag set to False, we do nothing. 
-                The function returns the element added in the relationship as well as the previous and after length of the collection w.r.t. the add operation.
-                We will also return whether or not we actually have added the new item to the collection and if we had to first create a new item
-                in the database.
-                """
-            if python_helpers.is_function(description):
-                description = description(dsc)
-            else:
-                description = dsc
-        if active_flag_name is None:
-            active_flag_name = "active"
-        if input_name is None:
-            input_name = "item"
-        if output_name is None:
-            output_name = f"{relation_name}AddOutcome"
-        if fields_to_check is None:
-            # fetch all the unique fields
-            fields_to_check = list(django_helpers.get_unique_field_names(django_element_type))
-        if old_length_output_name is None:
-            old_length_output_name = f"{relation_name}OldLength"
-        if new_length_output_name is None:
-            new_length_output_name = f"{relation_name}NewLength"
-        if added_output_name is None:
-            added_output_name = f"{relation_name}Added"
-        if created_output_name is None:
-            created_output_name = f"{relation_name}Created"
-
-        # if token_name is None:
-        #     token_name = "token"
-        # if active_flag_name is None:
-        #     active_flag_name = "active"
-        # if fields_to_check is None:
-        #     # fetch all the unique fields
-        #     fields_to_check = list(django_helpers.get_unique_field_names(django_type))
-        # if description is None:
-        #     description = f"""Allows you to create a new instance of {django_type.__name__}.
-        #         If the object is already present we throw an exception.
-        #         We raise an exception if we are able to find a row in the database with the same fields: {', '.join(fields_to_check)}.
-        #     """
-        #     if permissions_required is not None:
-        #         description += f"""Note that you need to authenticate your user in order to use this mutation.
-        #         The permission your user is required to have are: {', '.join(permissions_required)}.
-        #         """
-        # if input_name is None:
-        #     input_name = stringcase.camelcase(django_type.__name__)
-        # if output_name is None:
-        #     output_name = stringcase.camelcase(django_type.__name__)
-        # if hasattr(mutation_class_name, "__call__"):
-        #     # if create_mutation_name is a function, call it
-        #     mutation_class_name = mutation_class_name(django_type.__name__)
-
-        def body(mutation_class, info, *args, **kwargs) -> any:
-            result_create = False
-
-            input = kwargs[input_name]
-            d = dict()
-            for f in fields_to_check:
-                d[f] = getattr(input, f)
-            d[active_flag_name] = True
-            # check if the element we need to add exists in the database
-            if not django_element_type.objects.has_at_least_one(**d):
-                if add_if_not_present:
-                    # we need to create the object
-                    # create argument and omits the None values
-                    create_args = {k: v for k, v in dict(input).items() if v is not None}
-                    object_to_add = django_element_type.objects.create(**create_args)
-                    if object_to_add is None:
-                        raise GraphQLAppError(error_codes.CREATION_FAILED, object=django_element_type.__name__,
-                                              values=create_args)
-                    result_create = True
-                else:
-                    raise GraphQLAppError(error_codes.OBJECT_NOT_FOUND, object=django_element_type.__name__, values=d)
-            else:
-                object_to_add = django_element_type.objects.get(**d)
-
-            # ok, now add the relationship (if needed)
-            old_len = getattr(django_list_owner_type, manager_for_the_list).all().count()
-            getattr(django_list_owner_type, manager_for_the_list).add(object_to_add)
-            new_len = getattr(django_list_owner_type, manager_for_the_list).all().count()
-            result_added = new_len > old_len
-
-            # yield result
-            return mutation_class(
-                **{output_name: object_to_add, added_output_name: result_added, created_output_name: result_create,
-                   old_length_output_name: old_len, new_length_output_name: new_len})
-
-        arguments = dict()
-        arguments[input_name] = cls.argument_required_input(graphene_element_input_type,
-                                                            description="The object to add into the database. id should not be populated. ")
-        # if permissions_required is not None:
-        #     arguments[token_name] = cls.argument_jwt_token()
-        #     body = auth_decorators.graphql_ensure_login_required()(body)
-        #     body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
-
-        return cls.create_mutation(
-            mutation_class_name=str(mutation_class_name),
-            description=description,
-            arguments={**arguments, **additional_mutation_inputs},
-            return_type={
-                output_name: cls.returns_nonnull(django_element_type,
-                                                 description=f"the {django_element_type.__name__} we just added in the relation"),
-                added_output_name: cls.returns_required_boolean(
-                    description=f"True if we had added a new item in the collection, false otherwise"),
-                created_output_name: cls.returns_required_boolean(
-                    description=f"True if we had created the new item in the database before adding it to the relation"),
-                old_length_output_name: cls.returns_required_int(
-                    description=f"The number of elements in the collection before the add operation was performed"),
-                new_length_output_name: cls.returns_required_int(
-                    description=f"The number of elements in the collection after the add operation was performed"),
-            },
-            body=body
-        )
-
-
 class GraphQLHelper(object):
     """
     Class used to generate relevant queries and mutations fields for graphql
     """
 
-
-
     @classmethod
     def generate_graphql_crud_of(cls,
-            django_type: type, django_graphql_type: type, django_input_type: type, django_graphql_list_type: type,
-            active_field_name: str = None,
-            create_compare_fields: List[str] = None,
-            permissions_required_create: List[str] = None,
-            permissions_required_read: List[str] = None,
-            permissions_required_update: List[str] = None,
-            permissions_required_delete: List[str] = None,
-            class_names: "ICrudOperationNamer" = None,
-            generate_create: bool = True,
-            generate_read_all: bool = True,
-            generate_read_single: bool = True,
-            generate_update: bool = True,
-            generate_delete: bool = True,
-            token_name: str = None
-                ) -> Tuple[type, type, type, type, type]:
+                                 django_type: type, django_graphql_type: type, django_input_type: type,
+                                 django_graphql_list_type: type,
+                                 active_field_name: str = None,
+                                 create_compare_fields: List[str] = None,
+                                 permissions_required_create: List[str] = None,
+                                 permissions_required_read: List[str] = None,
+                                 permissions_required_update: List[str] = None,
+                                 permissions_required_delete: List[str] = None,
+                                 class_names: "ICrudOperationNamer" = None,
+                                 generate_create: bool = True,
+                                 generate_read_all: bool = True,
+                                 generate_read_single: bool = True,
+                                 generate_update: bool = True,
+                                 generate_delete: bool = True,
+                                 token_name: str = None
+                                 ) -> Tuple[type, type, type, type, type]:
         """
         Generate a default create, update, delete operations. Delete actually just set the active field set to false.
 
@@ -460,7 +310,8 @@ class GraphQLHelper(object):
             )
 
         if generate_read_all:
-            get_all_filter = filters_helpers.create_dynamic_active_django_filter("All", django_type, active_field_name, {})
+            get_all_filter = filters_helpers.create_dynamic_active_django_filter("All", django_type, active_field_name,
+                                                                                 {})
             read_all = cls.create_authenticated_list(
                 django_type=django_type,
                 django_graphql_type=django_graphql_type,
@@ -472,15 +323,19 @@ class GraphQLHelper(object):
             )
 
         if generate_read_single:
-            get_single_filter = filters_helpers.create_django_filter_returning_one_value(primary_key_name, django_type, active_field_name, {primary_key_name: ["exact"]})
+            get_single_filter = filters_helpers.create_django_filter_returning_one_value(primary_key_name, django_type,
+                                                                                         active_field_name,
+                                                                                         {primary_key_name: ["exact"]})
             read_single = cls.generate_query_from_filter_set(
                 return_single=True,
                 django_type=django_type,
                 django_graphql_type=django_graphql_type,
                 permissions_required=permissions_required_read,
                 filterset_type=get_single_filter,
-                query_class_name=lambda dt, ft: class_names.get_read_single_by_primary_key_name(django_type, primary_key_name),
-                output_name=class_names.get_read_single_by_primary_key_return_value_name(django_type, primary_key_name, get_single_filter),
+                query_class_name=lambda dt, ft: class_names.get_read_single_by_primary_key_name(django_type,
+                                                                                                primary_key_name),
+                output_name=class_names.get_read_single_by_primary_key_return_value_name(django_type, primary_key_name,
+                                                                                         get_single_filter),
                 token_name=token_name,
             )
 
@@ -556,7 +411,11 @@ class GraphQLHelper(object):
         return cls.create_simple_query(return_type=return_type, arguments=arguments, description=description)
 
     @classmethod
-    def create_authenticated_list(cls, django_type: type, django_graphql_type: type, get_all_filter: any, permissions_required: List[str], query_class_name: Union[str, Callable[[type, type], str]] = None, output_name: Union[str, Callable[[str, any], str]] = None, token_name: str = None) -> type:
+    def create_authenticated_list(cls, django_type: type, django_graphql_type: type, get_all_filter: any,
+                                  permissions_required: List[str],
+                                  query_class_name: Union[str, Callable[[type, type], str]] = None,
+                                  output_name: Union[str, Callable[[str, any], str]] = None,
+                                  token_name: str = None) -> type:
         """
         Create an authentication query allowing you to to list all the content of a particular model satisfying the specified
         filter. The return type of this query is always a list.
@@ -581,8 +440,43 @@ class GraphQLHelper(object):
         return read_all
 
     @classmethod
+    def create_authenticated_list_from_callable(cls, django_type: TDjangoModelType, django_graphql_type: TGrapheneType,
+                                  permissions_required: List[str],
+                                  query_description: str = None,
+                                  query_arguments: Dict[str, TGrapheneArgument] = None,
+                                  query_callable: Callable[[QuerySet, any], Union[QuerySet, any]] = None,
+                                  query_class_name: Union[str, Callable[[type, type], str]] = None,
+                                  output_name: Union[str, Callable[[str, any], str]] = None,
+                                  token_name: str = None) -> type:
+        """
+        Create an authentication query allowing you to to list all the content of a particular model satisfying the specified
+        filter. The return type of this query is always a list.
+
+        :param django_type: a type representing the models.Model subclass
+        :param django_graphql_type: a type representing the DjangoObjectType of the corresponding django_type
+        :param get_all_filter: django query filter that implements the output of the query
+        :param permissions_required: set of permissions the authenticated query needs to satisfy
+        :param token_name: name of the token used to authenticate the query. If left missing it isd "token"
+        :return: type representing the graphene query list.
+        """
+        read_all = cls.generate_query_from_lambda(
+            return_single=False,
+            django_type=django_type,
+            django_graphql_type=django_graphql_type,
+            permissions_required=permissions_required,
+            query_arguments=query_arguments,
+            query_description=query_description,
+            query_callable=query_callable,
+            query_class_name=query_class_name,
+            output_name=output_name,
+            token_name=token_name
+        )
+        return read_all
+
+    @classmethod
     def create_authenticated_query(cls, query_class_name: str, description: str, arguments: Dict[str, type],
-                        return_type: type, body: Callable, permissions_required: List[str], add_token: bool = False, token_name: str = None) -> type:
+                                   return_type: type, body: Callable, permissions_required: List[str],
+                                   add_token: bool = False, token_name: str = None) -> type:
         """
         Create a graphQL query. Decorators on body will be considered
 
@@ -612,12 +506,13 @@ class GraphQLHelper(object):
             arguments=arguments,
             output_name=stringcase.camelcase(query_class_name),
             return_type=return_type,
-            body=auth_decorators.graphql_ensure_login_required()(auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body))
+            body=auth_decorators.graphql_ensure_login_required()(
+                auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body))
         )
 
     @classmethod
     def create_query(cls, query_class_name: str, description: str, arguments: Dict[str, type],
-                        output_name: str, return_type: type, body: Callable) -> type:
+                     output_name: str, return_type: type, body: Callable) -> type:
         """
         Create a graphQL query. Decorators on body will be considered
 
@@ -647,7 +542,10 @@ class GraphQLHelper(object):
         assert output_name is not None, f"output of {query_class_name} is None"
         assert return_type is not None, f"return type of {query_class_name} is None"
         assert description is not None, f"description of {query_class_name} is None"
-        assert not isinstance(return_type, graphene.Field), f"return type {return_type} of {query_class_name} does not need to be a field, but a plain ObjectType!"
+        assert (not inspect.isclass(return_type)) or (issubclass(return_type, (graphene.Scalar, graphene.ObjectType, graphene_django.DjangoObjectType))), \
+            f"return type \"{return_type}\" of \"{query_class_name}\" cannot be a type subclass graphene.Field, but needs to be a plain ObjectType!"
+        assert ((inspect.isclass(return_type)) or (isinstance(return_type, (graphene.List, graphene.Field)))), \
+            f"return type \"{return_type}\" of \"{query_class_name}\" cannot be an instanc deriving graphene.Field, but needs to be a plain ObjectType!"
 
         def perform_query(root, info, *args, **kwargs) -> any:
             if root is None:
@@ -656,22 +554,35 @@ class GraphQLHelper(object):
             # check output soundness. It is important because debuggin this type of error is quite difficult.
             if isinstance(result, list):
                 if not isinstance(return_type, graphene.List):
-                    raise TypeError(f"Query generated a list ({result}), but the query expected to return a {return_type}")
+                    raise TypeError(
+                        f"Query generated a list ({result}), but the query expected to return a {return_type}")
             else:
+                # check if it is field
+                # if isinstance(result, graphene.Field):
+                #     result = result.type
+
                 if isinstance(result, root):
                     # the return value is the same as the root class. (e.g., CookiePolicy and CookiePolicy instance
                     pass
                 elif not isinstance(result, return_type):
                     # maybe the result is AuthUser and the return type is AuthUserGraphQLType
-                    # in case of CookiePolicy and String. The problem here is that return type is just a field of the return class
-                    # some "_meta" classes (e.g., ScalarOptions) do not have a "model" attribute, so we need to filter it
-                    if not isinstance(result, return_type._meta.model):
-                        raise TypeError(f"Expected body of query {query_class_name} to return either {return_type.__name__} or {return_type._meta.model.__name__}, but instead it returned {type(result).__name__}")
+                    # in case of CookiePolicy and String. The problem here is that return type is
+                    # just a field of the return class some "_meta" classes (e.g., ScalarOptions) do not
+                    # have a "model" attribute, so we need to filter it
+                    if hasattr(return_type._meta, "model"):
+                        if not isinstance(result, return_type._meta.model):
+                            raise TypeError(f"""Expected body of query {query_class_name} to return either 
+                                {return_type.__name__} or {return_type._meta.model.__name__}, but instead it 
+                                returned {type(result).__name__}""")
             return result
+
+        if isinstance(return_type, graphene.Field):
+            # needed otherwise graphene.schema will raise an exception
+            return_type = return_type.type
 
         query_class = type(
             query_class_name,
-            (graphene.ObjectType, ),
+            (graphene.ObjectType,),
             {
                 "__doc__": description,
                 f"resolve_{output_name}": perform_query,
@@ -684,7 +595,152 @@ class GraphQLHelper(object):
         return decorated_query_class
 
     @classmethod
-    def generate_query_from_filter_set(cls, django_type: type, django_graphql_type: type, filterset_type: type, return_single: bool, query_class_name: Union[str, Callable[[str, str], str]] = None, permissions_required: List[str] = None, output_name: str = None, token_name: str = None) -> type:
+    def generate_query_from_lambda(cls, django_type: TDjangoModelType, django_graphql_type: TGrapheneType,
+                                       return_single: bool = False,
+                                       query_description: str = None,
+                                       query_arguments: Dict[str, TGrapheneArgument] = None,
+                                       query_callable: Callable[[QuerySet, Dict[str, any]], Union[QuerySet, any]] = None,
+                                       query_class_name: Union[str, Callable[[str], str]] = None,
+                                       permissions_required: List[str] = None, output_name: str = None,
+                                       query_output_return_type: TGrapheneReturnType = None,
+                                       token_name: str = None) -> TGrapheneQuery:
+        """
+        generate a single graphQL query reprensented by the given callable
+
+
+        .. :code-block: python
+
+            generate_query_from_lambda(
+                django_type=Author,
+                django_graphql_type=AuthorGraphQL,
+                return_single=True,
+                query_description="find a single author by name",
+                query_arguments=dict(
+                    id=graphene.ID(required=True),
+                ),
+                query_callable=lambda qs, id: qs.filter(pk=id)
+                query_class_name="FindAuthorById",
+                permissions_required=["can_view_author"]
+            )
+
+        :param django_type: class deriving from models.Model
+        :param django_graphql_type: class deriving from DjangoObjectType of graphene package
+        :param query_description: description of the query callable
+        :param query_callable: the function used to filter queries. First input parameter is the query set from objects.all()
+            while the seocndi is dictionary containing all the graphql query parameters. Make sure the parameter name
+            corresponds to the query argument.
+        :param return_single: if True, you know that the query will return a single result. Otherwise it will return
+            a list. Ignored if "query_output_return_type" is set
+        :param permissions_required: list fo permissions that the autneticatd user needs to satisfy if she wants to gain
+            access to the query. If left None, the query won't be authenticated at all
+        :param output_name: name of the return value fo the qiery. It is also the name of the query altogether
+        :param query_output_return_type: the type of a return value field in the query output storing the output of the query.
+            Ifl eft unspecified it isi either a django_graphql_type or or a list of django_graphql_type. However, if you
+            need a different output tyype (e.g., a different type or a dictionary), you can set this field.
+            By doing so, "return_single" will be ignored. Notice that you need to make sure the correct type is
+            returned by "query_callable", if this is the case.
+        :param token_name: name of the token used to authenticate the query
+        :return: a graphql query type representing a query to perform on the system
+        """
+
+        def default_query_callable(query_param: Dict[str, any], query_set: QuerySet) -> Union[QuerySet, any]:
+            return query_set
+
+        p = inflect.engine()
+
+        django_type_str = stringcase.pascalcase(django_type.__name__)
+        if token_name is None:
+            token_name = "token"
+        if query_callable is None:
+            query_callable = default_query_callable
+        if query_description is None:
+            query_description = f"Get all the {django_type_str} involved"
+        if query_arguments is None:
+            query_arguments = dict()
+
+        # QUERY NAME
+        if query_class_name is None:
+            query_class_name = stringcase.pascalcase(django_type_str)
+        else:
+            if python_helpers.is_function(query_class_name):
+                # function
+                query_class_name = query_class_name(django_type_str)
+            elif isinstance(query_class_name, str):
+                pass
+            else:
+                raise TypeError(f"Invalid type {type(query_class_name)}!")
+
+        # GRAPHQL DESCRIPTION
+        description_multiplier = "a single" if return_single else "all the"
+        description = f"""This query allow the user to retrieve {description_multiplier} active {django_type.__name__} within the system
+            satisfying the following given condition: {query_description}.
+            """
+        if permissions_required is not None:
+            description += f"""The query needs authentication in order to be run. The permissions required 
+                by the backend in order to properly work are: {', '.join(permissions_required)}"""
+
+        # GRAPHQL QUERY OUTPUT FIELD NAME
+        if output_name is None:
+            output_name = f"{stringcase.camelcase(django_type.__name__)}QueryOutcome"
+
+        # GRAPHQL QUERY OUTPUT FIELD
+        if query_output_return_type is None:
+            return_single_meaningful = True
+            # return type
+            if return_single:
+                query_return_type = django_graphql_type
+            else:
+                query_return_type = graphene.List(django_graphql_type)
+        else:
+            return_single_meaningful = False
+            query_return_type = query_output_return_type
+
+        # GRAPHQL QUERY ARGUMENTS
+        # the query arguments are all the single filters available in the filterset
+        arguments: Dict[str, type] = dict()
+        for field_name, field in query_arguments.items():
+            arguments[field_name] = field
+
+        # GRAPHQL BODY
+        def body(query_class, info, *args, **kwargs) -> any:
+            # query actual parameters. May be somethign of sort: {'username': 'alex', 'status': '1'}
+            # we need to remove the token argument (if present)
+            query_actual_parameters = {k: kwargs[k] for k in arguments if k in kwargs and k not in (token_name,)}
+            # see https://github.com/carltongibson/django-filter/blob/main/tests/test_filtering.py
+            qs = django_type._default_manager.all()
+            output = query_callable(qs, **query_actual_parameters)
+            # return output
+            if not return_single_meaningful:
+                return output
+            else:
+                if return_single:
+                    return output
+                else:
+                    return list(output)
+
+        # GRAPHQL PERMISSIONS
+        if permissions_required is not None:
+            # add token and authentication decorators
+            arguments[token_name] = cls.argument_jwt_token()
+            body = auth_decorators.graphql_ensure_login_required()(body)
+            body = auth_decorators.graphql_ensure_user_has_permissions(permissions_required)(body)
+
+        result = cls.create_query(
+            query_class_name=query_class_name,
+            description=description,
+            arguments=arguments,
+            output_name=output_name,
+            return_type=query_return_type,
+            body=body
+        )
+        return result
+
+    @classmethod
+    def generate_query_from_filter_set(cls, django_type: type, django_graphql_type: type, filterset_type: type,
+                                       return_single: bool,
+                                       query_class_name: Union[str, Callable[[str, str], str]] = None,
+                                       permissions_required: List[str] = None, output_name: str = None,
+                                       token_name: str = None) -> type:
         """
         generate a single graphQL query reprensented by the given filter_set
 
@@ -751,7 +807,7 @@ class GraphQLHelper(object):
         def body(query_class, info, *args, **kwargs) -> any:
             # query actual parameters. May be somethign of sort: {'username': 'alex', 'status': '1'}
             # we need to remove the token argument (if present)
-            query_actual_parameters = {k: kwargs[k] for k in arguments if k in kwargs and k not in (token_name, )}
+            query_actual_parameters = {k: kwargs[k] for k in arguments if k in kwargs and k not in (token_name,)}
             # see https://github.com/carltongibson/django-filter/blob/main/tests/test_filtering.py
             qs = django_type.objects.all()
             f = filterset_type(query_actual_parameters, queryset=qs)
@@ -776,7 +832,8 @@ class GraphQLHelper(object):
         )
 
     @classmethod
-    def create_mutation(cls, mutation_class_name: str, description: str, arguments: Dict[str, any], return_type: Dict[str, any], body: Callable) -> type:
+    def create_mutation(cls, mutation_class_name: str, description: str, arguments: Dict[str, any],
+                        return_type: Dict[str, any], body: Callable) -> type:
         """
         Create a generic mutation
 
@@ -795,12 +852,15 @@ class GraphQLHelper(object):
         assert all(map(lambda x: x is not None, arguments.keys())), f"argument of {mutation_class_name} are none"
         assert return_type is not None, "return type is None. This should not be possible"
         assert "mutate" not in return_type.keys(), f"mutate in return type of class {mutation_class_name}"
-        assert all(map(lambda x: x is not None, return_type.keys())), f"some return value of {mutation_class_name} are None"
+        assert all(
+            map(lambda x: x is not None, return_type.keys())), f"some return value of {mutation_class_name} are None"
         assert description is not None, f"description of {mutation_class_name} is None"
+        assert isinstance(arguments, dict), f"argument is not a dictionary"
+        assert isinstance(list(arguments.keys())[0], str), f"argument keys are not strings!"
 
         mutation_class_meta = type(
             "Arguments",
-            (object, ),
+            (object,),
             arguments
         )
 
@@ -810,10 +870,11 @@ class GraphQLHelper(object):
             return body(root, info, *args, **kwargs)
 
         LOG.info(f"Argument are {arguments}")
-        LOG.info(f"Creating mutation={mutation_class_name}; metaclass={mutation_class_meta.__name__}; arguments keys={',' .join(arguments.keys())}; return={', '.join(return_type.keys())}")
+        LOG.info(
+            f"Creating mutation={mutation_class_name}; metaclass={mutation_class_meta.__name__}; arguments keys={','.join(arguments.keys())}; return={', '.join(return_type.keys())}")
         mutation_class = type(
             mutation_class_name,
-            (graphene.Mutation, ),
+            (graphene.Mutation,),
             {
                 "Arguments": mutation_class_meta,
                 "__doc__": description,
@@ -827,7 +888,9 @@ class GraphQLHelper(object):
         return mutation_class
 
     @classmethod
-    def create_authenticated_mutation(cls, mutation_class_name: str, description: str, arguments: Dict[str, any], return_type: Dict[str, any], body: Callable, required_permissions: List[str], token_name: str = None) -> type:
+    def create_authenticated_mutation(cls, mutation_class_name: str, description: str, arguments: Dict[str, any],
+                                      return_type: Dict[str, any], body: Callable, required_permissions: List[str],
+                                      token_name: str = None) -> type:
         """
         Create a generic mutation which requires authentication. Authentication is automatically added
 
@@ -869,7 +932,8 @@ class GraphQLHelper(object):
                 "Arguments": mutation_class_meta,
                 "__doc__": description,
                 **return_type,
-                "mutate": auth_decorators.graphql_ensure_login_required()(auth_decorators.graphql_ensure_user_has_permissions(required_permissions)(mutate))
+                "mutate": auth_decorators.graphql_ensure_login_required()(
+                    auth_decorators.graphql_ensure_user_has_permissions(required_permissions)(mutate))
             }
         )
         # Apply decorator to auto detect mutations
@@ -878,7 +942,12 @@ class GraphQLHelper(object):
         return mutation_class
 
     @classmethod
-    def generate_mutation_create(cls, django_type: type, django_graphql_type: type, django_input_type: type, active_flag_name: str = None, fields_to_check: List[str] = None, description: str = None, input_name: str = None, output_name: str = None, permissions_required: List[str] = None, mutation_class_name: Union[str, Callable[[str], str]] = None, token_name: str = None) -> type:
+    def generate_mutation_create(cls, django_type: type, django_graphql_type: type, django_input_type: type,
+                                 active_flag_name: str = None, fields_to_check: List[str] = None,
+                                 description: str = None, input_name: str = None, output_name: str = None,
+                                 permissions_required: List[str] = None,
+                                 mutation_class_name: Union[str, Callable[[str], str]] = None,
+                                 token_name: str = None) -> type:
         """
         Create a mutation that adds a new element in the database.
         We will generate a mutation that accepts a single input parameter. It checks if the input is not already present in the database and if not, it adds it.
@@ -946,7 +1015,8 @@ class GraphQLHelper(object):
             return mutation_class(result)
 
         arguments = dict()
-        arguments[input_name] = cls.argument_required_input(django_input_type, description="The object to add into the database. id should not be populated. ")
+        arguments[input_name] = cls.argument_required_input(django_input_type,
+                                                            description="The object to add into the database. id should not be populated. ")
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
             body = auth_decorators.graphql_ensure_login_required()(body)
@@ -957,15 +1027,20 @@ class GraphQLHelper(object):
             description=description,
             arguments=arguments,
             return_type={
-                output_name: cls.returns_nonnull(django_graphql_type, description=f"the {django_type.__name__} just added into the database")
+                output_name: cls.returns_nonnull(django_graphql_type,
+                                                 description=f"the {django_type.__name__} just added into the database")
             },
             body=body
         )
 
     @classmethod
-    def generate_mutation_update_primitive_data(cls, django_type: type, django_graphql_type: type, django_input_type: type,
-                                 description: str = None, input_name: str = None,
-                                 active_flag_name: str = None, output_name: str = None, permissions_required: List[str] = None, mutation_class_name: Union[str, Callable[[str], str]] = None, token_name: str = None) -> type:
+    def generate_mutation_update_primitive_data(cls, django_type: type, django_graphql_type: type,
+                                                django_input_type: type,
+                                                description: str = None, input_name: str = None,
+                                                active_flag_name: str = None, output_name: str = None,
+                                                permissions_required: List[str] = None,
+                                                mutation_class_name: Union[str, Callable[[str], str]] = None,
+                                                token_name: str = None) -> type:
         """
         Create a mutation that revise a previously added element in the database to a newer version.
         This mutation updates only the primitive fields within the entity, jnot the relationships.
@@ -1041,7 +1116,7 @@ class GraphQLHelper(object):
         arguments = dict()
         arguments[primary_key_name] = cls.argument_required_id(django_type.__name__)
         arguments[input_name] = cls.argument_required_input(django_input_type,
-                                                               description="The object that will update the one present in the database.")
+                                                            description="The object that will update the one present in the database.")
         if permissions_required is not None:
             arguments[token_name] = cls.argument_jwt_token()
             body = auth_decorators.graphql_ensure_login_required()(body)
@@ -1053,7 +1128,7 @@ class GraphQLHelper(object):
             arguments=arguments,
             return_type={
                 output_name: cls.returns_nonnull(django_graphql_type,
-                                                    description=f"same {django_type.__name__} you have fetched in input")
+                                                 description=f"same {django_type.__name__} you have fetched in input")
             },
             body=body
         )
@@ -1064,7 +1139,8 @@ class GraphQLHelper(object):
                                          description: str = None, input_name: str = None,
                                          output_name: str = None,
                                          permissions_required: List[str] = None,
-                                         mutation_class_name: Union[str, Callable[[str], str]] = None, token_name: str = None) -> type:
+                                         mutation_class_name: Union[str, Callable[[str], str]] = None,
+                                         token_name: str = None) -> type:
         """
         Create a mutation that deletes a row stored in the database. Depending on the on_delete, this may lead to the removal of other dependant rows
         We will generate a mutation that accepts a single array of integers, each representing the ids to delete.
@@ -1140,20 +1216,20 @@ class GraphQLHelper(object):
             arguments=arguments,
             return_type={
                 output_name: cls.returns_id_list(django_graphql_type,
-                                                    description=f"all the ids of the {django_type.__name__} models we have removed from the database")
+                                                 description=f"all the ids of the {django_type.__name__} models we have removed from the database")
             },
             body=body
         )
 
     @classmethod
     def generate_mutation_mark_inactive(cls, django_type: type, django_graphql_type: type,
-                                django_input_type: type,
-                                description: str = None, input_name: str = None,
-                                output_name: str = None,
-                                active_flag_name: str = None,
-                                permissions_required: List[str] = None,
-                                mutation_class_name: Union[str, Callable[[str], str]] = None,
-                                token_name: str = None) -> type:
+                                        django_input_type: type,
+                                        description: str = None, input_name: str = None,
+                                        output_name: str = None,
+                                        active_flag_name: str = None,
+                                        permissions_required: List[str] = None,
+                                        mutation_class_name: Union[str, Callable[[str], str]] = None,
+                                        token_name: str = None) -> type:
         """
         Create a mutation that simulate a deletes of a row stored in the database by setting the corresponding active flag to false.
         This usually set as inactive only the given row.
@@ -1232,7 +1308,7 @@ class GraphQLHelper(object):
             arguments=arguments,
             return_type={
                 output_name: cls.returns_id_list(django_graphql_type,
-                    description=f"all the ids of the {django_type.__name__} models we have removed from the database")
+                                                 description=f"all the ids of the {django_type.__name__} models we have removed from the database")
             },
             body=body
         )
@@ -1244,7 +1320,7 @@ class GraphQLHelper(object):
     @classmethod
     def jwt_token(cls) -> graphene.String:
         return graphene.String(required=False, description=
-            """jwt token used to authorize the request. 
+        """jwt token used to authorize the request. 
             If left out, we will use the token present in the Authorization header. 
             """)
 
@@ -1290,7 +1366,7 @@ class GraphQLHelper(object):
         """
         A boolean, which needs to be specified
         """
-        return graphene.Boolean(required=True)
+        return graphene.Boolean(required=True, description=description)
 
     @classmethod
     def required_string(cls, description: str = None) -> graphene.String:
@@ -1300,11 +1376,23 @@ class GraphQLHelper(object):
         return graphene.String(required=True, description=description)
 
     @classmethod
-    def required_int(cls, description: str = None) -> graphene.String:
+    def required_int(cls, description: str = None) -> graphene.Int:
         """
         an int that needs to be specified
         """
         return graphene.Int(required=True, description=description)
+
+    @classmethod
+    def required_arrow_datetime(cls, description: str = None) -> ArrowDateTimeScalar:
+        return ArrowDateTimeScalar(required=True, description=description)
+
+    @classmethod
+    def required_arrow_date(cls, description: str = None) -> ArrowDateScalar:
+        return ArrowDateScalar(required=True, description=description)
+
+    @classmethod
+    def required_arrow_duration(cls, description: str = None) -> ArrowDurationScalar:
+        return ArrowDurationScalar(required=True, description=description)
 
     # MUTATION ARGUMENTS
 
@@ -1343,7 +1431,20 @@ class GraphQLHelper(object):
         return graphene.Argument(graphene.List(graphene.ID), required=True, description=desc)
 
     @classmethod
-    def argument_required_string_list(cls, entity: Union[type, str] = None, description: str = None) -> graphene.Argument:
+    def argument_required_input_list(cls, input_type: type, description: str = None) -> graphene.Argument:
+        """
+        String list that can be used to represents some entities (e.g., codename of permissions). Used within Argument metaclass for mutations
+
+        :param input_type: name of the class of the entity this id represents. The class needs to extend InputDjangoObjectType
+        :param description: description of the argument. it will be concatenated with the generated information
+        """
+        if description is None:
+            description = f"List of inputs"
+        return graphene.Argument(graphene.List(input_type), required=True, description=description)
+
+    @classmethod
+    def argument_required_string_list(cls, entity: Union[type, str] = None,
+                                      description: str = None) -> graphene.Argument:
         """
         String list that can be used to represents some entities (e.g., codename of permissions). Used within Argument metaclass for mutations
 
@@ -1387,7 +1488,10 @@ class GraphQLHelper(object):
         :return: argument of a mutation
         """
         if description is None:
-            description = f"input of type {input_type.model.__name__}"
+            if hasattr(input_type, "model"):
+                description = f"input of type {input_type.model.__name__}"
+            else:
+                description = f"input type {input_type.__name__}"
         return graphene.Argument(input_type, required=True, description=description)
 
     @classmethod
@@ -1396,6 +1500,18 @@ class GraphQLHelper(object):
             required=False,
             description="jwt token used to authorize the request. If left out, we will use the token present in the Authroization header"
         )
+
+    @classmethod
+    def argument_required_arrow_datetime(cls, description: str = None) -> ArrowDateTimeScalar:
+        return ArrowDateTimeScalar(required=True, description=description)
+
+    @classmethod
+    def argument_required_arrow_date(cls, description: str = None) -> ArrowDateScalar:
+        return ArrowDateScalar(required=True, description=description)
+
+    @classmethod
+    def argument_required_arrow_duration(cls, description: str = None) -> ArrowDurationScalar:
+        return ArrowDurationScalar(required=True, description=description)
 
     # RETURN VALUES
 
@@ -1414,8 +1530,8 @@ class GraphQLHelper(object):
             entity_name = entity_type.__name__
         else:
             raise TypeError(f"invalid type {entity_type}!")
-        return graphene.List(graphene.ID, required=True, description=f"{MUTATION_FIELD_DESCRIPTION}. List of {entity_name} ids. {description}")
-
+        return graphene.List(graphene.ID, required=True,
+                             description=f"{MUTATION_FIELD_DESCRIPTION}. List of {entity_name} ids. {description}")
 
     @classmethod
     def return_ok(cls, description: str = None) -> graphene.Boolean:
@@ -1425,10 +1541,21 @@ class GraphQLHelper(object):
         :param description: additional description for the query. It will be concatenated after the default description
         :return: graphene type
         """
-        return graphene.Boolean(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} True if the oepration was successful, false otherwise")
+        return graphene.Boolean(required=True,
+                                description=f"{MUTATION_FIELD_DESCRIPTION} True if the oepration was successful, false otherwise")
 
     @classmethod
-    def returns_required_boolean(cls, description: str = None) -> graphene.Boolean:
+    def returns_nonnull_id(cls, description: str = None) -> graphene.ID:
+        """
+        A int, which needs to be always present, as the return value of either a query or a grpahql mutation
+
+        :param description: additional description for the query. It will be concatenated after the default description
+        :return: graphene type
+        """
+        return graphene.ID(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} {description or ''}")
+
+    @classmethod
+    def returns_nonnull_boolean(cls, description: str = None) -> graphene.Boolean:
         """
         A boolean, which needs to be always present, as the return value of either a query or a grpahql mutation
 
@@ -1438,7 +1565,7 @@ class GraphQLHelper(object):
         return graphene.Boolean(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} {description or ''}")
 
     @classmethod
-    def returns_required_int(cls, description: str = None) -> graphene.Int:
+    def returns_nonnull_int(cls, description: str = None) -> graphene.Int:
         """
         A int, which needs to be always present, as the return value of either a query or a grpahql mutation
 
@@ -1448,7 +1575,7 @@ class GraphQLHelper(object):
         return graphene.Int(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} {description or ''}")
 
     @classmethod
-    def returns_required_float(cls, description: str = None) -> graphene.Float:
+    def returns_nonnull_float(cls, description: str = None) -> graphene.Float:
         """
         A float, which needs to be always present, as the return value of either a query or a grpahql mutation
 
@@ -1458,7 +1585,7 @@ class GraphQLHelper(object):
         return graphene.Float(required=True, description=f"{MUTATION_FIELD_DESCRIPTION} {description or ''}")
 
     @classmethod
-    def returns_required_string(cls, description: str = None) -> graphene.String:
+    def returns_nonnull_string(cls, description: str = None) -> graphene.String:
         """
         A strnig, which needs to be always present, as the return value of either a query or a grpahql mutation
 
@@ -1491,4 +1618,19 @@ class GraphQLHelper(object):
         """
         if description is None:
             description = ""
-        return graphene.Field(graphene.List(return_type), description=f"{MUTATION_FIELD_DESCRIPTION} {description}", required=True)
+        return graphene.Field(graphene.List(return_type), description=f"{MUTATION_FIELD_DESCRIPTION} {description}",
+                              required=True)
+
+    @classmethod
+    def returns_nonnull_idlist(cls, concept: str = None, description: str = None) -> graphene.Field:
+        """
+        tells the system that the mutation returns a lnon null list of ids
+
+        :param concept: cocnept a generic id in the list represents
+        :param description: if present, the help text to show to graphiQL
+        :return: return value of a mutation
+        """
+        if description is None:
+            description = f"List of ID, each representing a single {concept}"
+        return graphene.Field(graphene.List(graphene.ID(required=True)), description=f"{MUTATION_FIELD_DESCRIPTION} {description}",
+                              required=True)

@@ -7,7 +7,7 @@ class AbstractGraphQLError(GraphQLError):
     """
     def __init__(self, error_code: any, **kwargs):
         super().__init__(
-            message=f"Code={int(self.code):04d} ({str(self.code)})",
+            message=f"Code={int(error_code):04d} ({str(error_code)})",
             extensions=dict(kwargs)
         )
         self.code = error_code

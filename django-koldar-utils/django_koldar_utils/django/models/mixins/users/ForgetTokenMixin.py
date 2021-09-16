@@ -25,7 +25,7 @@ class ForgetTokenMixin(models.Model):
     Token used to verify the reset password string. Present only if the user has initiated the reset password procedure
     """
     forget_password_token_creation_date = Orm.nullable_datetime(
-        help_text="The time when the forget_password_token was created. Used to detect if the token is expired")
+        description="The time when the forget_password_token was created. Used to detect if the token is expired")
     """
     The time when the forget_password_token was created. Used to detect if the token is expired
     """

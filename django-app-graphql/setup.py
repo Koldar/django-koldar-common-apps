@@ -16,21 +16,24 @@ s = library_setup.LibraryScriptSetup(
         "Operating System :: OS Independent",
     ],
     required_dependencies=[
-        "aniso8601>=8.1.1"
-        "arrow>=1.1.0"
-        "Django>=3.2.4"
-        "django-appconf>=1.0.4"
-        "django-currentuser>=0.5.3"
-        "django-koldar-utils>=2.8.1"
-        "django-polymorphic>=3.0.0"
-        "graphene>=3.0b7"
-        "graphene-django>=3.0.0b7"
-        "graphene-django-extras>=0.5.1"
-        "graphql-core>=3.1.5"
-        "jsonpath-ng>=1.5.2"
-        "pydot>=1.4.2"
-        "stringcase>=1.2.0"
-    ]
+        "aniso8601>=8.1.1",
+        "arrow>=1.1.0",
+        "Django>=3.2.4",
+        "django-appconf>=1.0.4",
+        "django-currentuser>=0.5.3",
+        "django-koldar-utils>=2.8.1",
+        "django-polymorphic>=3.0.0",
+        "graphene>=3.0b7",
+        "graphene-django>=3.0.0b7",
+        "graphene-django-extras>=0.5.1",
+        "graphql-core>=3.1.5",
+        "jsonpath-ng>=1.5.2",
+        "pydot>=1.4.2",
+        "stringcase>=1.2.0",
+        "graphene_file_upload>=1.3.0",
+        "semantic-version>=2.8.5",
+        "gql>=3.0.0a6",
+    ],
 )
 
 s.perform_setup()
