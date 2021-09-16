@@ -14,22 +14,6 @@ setupper = library_setup.LibraryScriptSetup(
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
     ],
-    required_dependencies=[
-        "Django>=3.2.5",
-        "django-appconf>=1.0.4",
-        "django-currentuser>=0.5.3",
-        "django-filter>=2.4.0",
-        "django-graphql-jwt>=0.3.2",
-        "django-koldar-utils>=2.55.16",
-        "django-polymorphic>=3.0.0",
-        "graphene>=3.0b7",
-        "graphene-django>=3.0.0b7",
-        "graphene-django-extras>=0.5.2",
-        "networkx>=2.5.1",
-        "pydot>=1.4.2",
-        "PyJWT>=2.1.0",
-        "stringcase>=1.2.0",
-    ],
     test_dependencies=[
         "pytest"
     ]
