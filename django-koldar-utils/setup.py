@@ -3,13 +3,13 @@ from typing import Iterable
 
 import setuptools
 from django_koldar_utils import version
-from django_koldar_utils.setuptools import library_setup
+from django_koldar_utils.setuptools_toolbox import library_setup
 
 
 s = library_setup.LibraryScriptSetup(
     author="Massimo Bono",
     author_mail="massimobono1@gmail.com",
-    description="Some stuff that i used when developing with django",
+    description="Some stuff that i used when developing with django_toolbox",
     keywords=["utils"],
     home_page="https://github.com/Koldar/django-koldar-common-apps",
     python_minimum_version="3.6",
@@ -21,4 +21,7 @@ s = library_setup.LibraryScriptSetup(
     ],
 )
 
-s.perform_setup()
+if __name__ == "__main__":
+    # introducted to handle the scenario: if we import thsi script only in order to fetch installation fields but not
+    # for running the scripts (e.g., sphinx)
+    s.perform_setup()

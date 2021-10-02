@@ -1,12 +1,12 @@
 # import abc
 # from typing import Iterable, Any, Dict, List
 #
-# from django_koldar_utils.django.ApplicationProperty import ApplicationProperty
+# from django_koldar_utils.django_toolbox.ApplicationProperty import ApplicationProperty
 #
 #
 # class AbstractDjangoSection(abc.ABC):
 #     """
-#     An alternative way used to configure settings.py django.
+#     An alternative way used to configure settings.py django_toolbox.
 #     Use to sovle dependencies of INSTALLED_APPS, automatically add piece of
 #     configurations in settings.py and configure authentication backends.
 #     """
@@ -71,7 +71,7 @@
 #         Alter the middlewares handled by the application. If you don't need to alter the middlewares,
 #         you can safely just return the "middleware" in input
 #         :param middlewares: list of middlesware to use
-#         :return: list of middlewares that the django project will use
+#         :return: list of middlewares that the django_toolbox project will use
 #         """
 #         pass
 #
@@ -104,7 +104,7 @@
 #     @abc.abstractmethod
 #     def get_variables_to_add_in_project_settings(self, base_dir: str) -> Dict[str, Any]:
 #         """
-#         list of variables to add in the settings.py of django project. The dictionary generated
+#         list of variables to add in the settings.py of django_toolbox project. The dictionary generated
 #         will be put in place of settings.
 #
 #         :param base_dir: BASE_DIR

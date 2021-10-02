@@ -138,7 +138,7 @@ def upload_to_test_pypi():
     if operating_system.on_linux():
         log.echo("Uploading for linux", foreground="blue")
         operating_system.execute_stdout_on_screen([
-            #"source venv/bin/activate",
+            #"docs venv/bin/activate",
             f"twine upload --verbose --repository testpypi --username \"{TWINE_TEST_PYPI_USER}\" --password \"{TWINE_TEST_PYPI_PASSWORD}\" {upload_files}",
             #"deactivate"
         ])

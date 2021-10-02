@@ -71,7 +71,7 @@ elif backend == "graphene":
 
     view = get_endpoint_from_graphene(enable_graphiql)
 else:
-    raise ValueError(f"backend must be ariadne or graphene")
+    raise ValueError(f"backend must be ariadne or graphene, intead it was {backend}!")
 
 
 urlpatterns.append(path(

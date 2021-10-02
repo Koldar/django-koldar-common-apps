@@ -3,7 +3,7 @@ import os
 
 from django.conf import settings
 from appconf import AppConf
-from django_koldar_utils.django.conf.DictSettingMergerAppConf import DictSettingMergerAppConf
+from django_koldar_utils.django_toolbox.conf.DictSettingMergerAppConf import DictSettingMergerAppConf
 
 
 class DjangoAppGraphQLAppConf(DictSettingMergerAppConf):

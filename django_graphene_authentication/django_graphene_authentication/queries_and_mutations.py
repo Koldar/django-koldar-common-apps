@@ -10,8 +10,8 @@ import stringcase
 import logging
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user
-from django_koldar_utils.django import auth_decorators
-from django_koldar_utils.graphql.GraphQLHelper import GraphQLHelper
+from django_koldar_utils.django_toolbox import auth_decorators
+from django_koldar_utils.graphql_toolsbox.GraphQLHelper import GraphQLHelper
 from graphene.types.generic import GenericScalar
 from graphene.utils.thenables import maybe_thenable
 
@@ -308,7 +308,7 @@ class AbstractGrapheneMutationCreator(abc.ABC):
         # (which is run when executing the query) we set it in a instance field
         self.me_query_actual_output_name = self.me_query_return_value_name(context)
 
-        me = GraphQLHelper.create_query(
+        me = GraphQLHelper._create_query(
             query_class_name=query_me_class_name,
             description=self.me_query_description(context, query_me_class_name),
             arguments=self.me_query_arguments(context),

@@ -3,8 +3,8 @@
 # from typing import Iterable, Any, List
 #
 # import networkx as nx
-# from django.core.exceptions import ImproperlyConfigured
-# from django.urls import path, include
+# from django_toolbox.core.exceptions import ImproperlyConfigured
+# from django_toolbox.urls import path, include
 #
 # from django_koldar_utils.functions import modules
 # from django_koldar_utils.sections.AbstractDjangoSection import AbstractDjangoSection
@@ -70,7 +70,7 @@
 #     """
 #     Update the Django INSTALLED_APPS
 #
-#     :param installed_apps: django INSTALLED_APPS
+#     :param installed_apps: django_toolbox INSTALLED_APPS
 #     :return: the updated value
 #     """
 #
@@ -139,7 +139,7 @@
 #     """
 #     Update the setting file with the expected properties required by the sections
 #
-#     :param settings: name of the settings for configuring your django project. Ususally it is the value of __name__
+#     :param settings: name of the settings for configuring your django_toolbox project. Ususally it is the value of __name__
 #         variable
 #     """
 #     # we assume the settings has a BASE_DIR value

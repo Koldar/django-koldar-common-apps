@@ -36,7 +36,8 @@ s = library_setup.LibraryScriptSetup(
     ],
 )
 
-s.perform_setup()
+if __name__ == "__main__":
+    s.perform_setup()
 
 
 #

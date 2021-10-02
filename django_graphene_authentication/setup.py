@@ -1,4 +1,4 @@
-from django_koldar_utils.setuptools import library_setup
+from django_koldar_utils.setuptools_toolbox import library_setup
 
 
 setupper = library_setup.LibraryScriptSetup(

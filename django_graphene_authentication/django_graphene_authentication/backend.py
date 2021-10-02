@@ -9,7 +9,7 @@ from jwt import exceptions as jwt_exceptions, DecodeError
 from django.apps import apps
 from django.conf import settings
 from django.http import HttpRequest
-from django_koldar_utils.django.AbstractDjangoBackend import AbstractDjangoBackend, TUSER, TPERMISSION, TUSER_ID
+from django_koldar_utils.django_toolbox.AbstractDjangoBackend import AbstractDjangoBackend, TUSER, TPERMISSION, TUSER_ID
 
 from django_graphene_authentication.utils import get_authenticating_token
 

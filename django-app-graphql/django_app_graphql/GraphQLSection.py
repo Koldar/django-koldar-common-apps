@@ -1,7 +1,7 @@
 # from datetime import timedelta
 # from typing import Iterable, Any, Dict, List
 #
-# from django_koldar_utils.django.ApplicationProperty import ApplicationProperty
+# from django_koldar_utils.django_toolbox.ApplicationProperty import ApplicationProperty
 # from django_koldar_utils.sections.AbstractDjangoSection import AbstractDjangoSection
 #
 #
