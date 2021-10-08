@@ -8,9 +8,10 @@ import stringcase
 import logging
 
 from django.db.models import QuerySet
+from graphene.types.unmountedtype import UnmountedType
 
 from django_koldar_utils.django_toolbox import filters_helpers, django_helpers, auth_decorators
-from django_koldar_utils.functions import python_helpers
+from koldar_utils.functions import python_helpers
 from django_koldar_utils.graphql_toolsbox import graphql_decorators, error_codes
 from django_koldar_utils.graphql_toolsbox.GraphQLAppError import GraphQLAppError
 from django_koldar_utils.graphql_toolsbox.graphql_types import TDjangoModelType, TGrapheneType, TGrapheneArgument, \
@@ -33,6 +34,47 @@ class GraphQLHelper(object):
     """
 
     # INFO
+
+    @classmethod
+    def is_field_id(cls, field_type: Union[graphene.ObjectType, TGrapheneReturnType, TGrapheneType]) -> bool:
+        """
+
+        :param field_type: field to check. It can also be an instance of field
+        :return: true if the graphene field represents an ID, false otherwise
+        """
+        field_type = GraphQLHelper.get_actual_type_from_field(field_type)
+        return issubclass(field_type, graphene.ID, graphene.GlobalID)
+
+    @classmethod
+    def is_field_non_primitive(cls, field_type: Union[graphene.ObjectType, TGrapheneReturnType, TGrapheneType]) -> bool:
+        """
+        :param field_type: field to check. It can also be an instance of field
+        :return: true if the graphene field represents a complex input, false otherwise
+        """
+        field_type = GraphQLHelper.get_actual_type_from_field(field_type)
+        return issubclass(field_type, graphene.InputObjectType)
+
+    @classmethod
+    def get_actual_type_from_field(cls, field: Union[graphene.ObjectType, TGrapheneReturnType, TGrapheneType]) -> TGrapheneReturnType:
+        """
+        Recursively query the field in order to find its basic representation. For example
+        the basic representation of "Field(ID!)" is "ID"
+
+        :param field: either a field instance (pretty rare but possible) or a type repersenting a field
+        :return: the field representing the field
+        """
+        if isinstance(field, graphene.ObjectType):
+            return GraphQLHelper.get_actual_type_from_field(type(field))
+        if isinstance(field, graphene.NonNull):
+            return GraphQLHelper.get_actual_type_from_field(field.of_type)
+        # if isinstance(field, UnmountedType):
+        #     return GraphQLHelper.get_actual_type_from_field(field.type)
+        if isinstance(field, graphene.Field):
+            return GraphQLHelper.get_actual_type_from_field(field.type)
+        if isinstance(field, graphene.Argument):
+            return GraphQLHelper.get_actual_type_from_field(field.type)
+        else:
+            return field
 
     @classmethod
     def is_representing_input_argument(cls, field: graphene.ObjectType) -> bool:

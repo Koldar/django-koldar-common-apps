@@ -9,6 +9,8 @@ from django.db import models
 from django.db.models import Model
 from polymorphic.managers import PolymorphicManager
 
+from django_koldar_utils.django_toolbox import django_helpers
+
 TMODEL = TypeVar("TMODEL")
 
 
@@ -144,6 +146,27 @@ class OnlyActiveManagerMixIn(models.Manager):
             kwargs = dict(kwargs)
             kwargs[self.active_field_name()] = True
         return super().get_queryset().get(*args, **kwargs)
+
+    def set_active_flag_to(self, instance: models.Model, enable: bool) -> bool:
+        """
+        Set the active flag of this instance to a specified value.
+
+        We will not persist the changes we have made. You have to manually set them
+
+        :param instance: instance to chec
+        :param enable: true if we want to active the modeol, false otherwis
+        :return: true if the model had an active field, false otherwise
+        """
+        return django_helpers.set_active_flag_to(instance, enable)
+
+    def is_active_flag_active(self, instance: models.Model) -> bool:
+        """
+        Check if the active flag value of this instance
+
+        :param instance: instance to check
+        :return: true if the model is active, false otherwise
+        """
+        return django_helpers.is_active_flag(instance, True)
 
 
 #todo readd Generic[TMODEL],

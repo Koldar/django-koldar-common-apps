@@ -2,9 +2,9 @@ from typing import Union
 
 from graphql import GraphQLError
 
-from django_koldar_utils.functions.stacktrace import filter_django_stack
+from koldar_utils.functions.stacktrace import filter_django_stack
 from django_koldar_utils.graphql_toolsbox.ErrorCode import ErrorCode
-
+from django_koldar_utils.graphql_toolsbox.error_codes import BACKEND_ERROR
 
 
 class GraphQLAppError(GraphQLError):

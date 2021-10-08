@@ -1,6 +1,9 @@
+import abc
 import ast
 import datetime
 import functools
+import tarfile
+from collections import OrderedDict
 from typing import Iterable, Tuple, List, Union, Dict, Callable, Optional
 
 import django.db.models
@@ -20,79 +23,18 @@ from graphene_django_extras import LimitOffsetGraphqlPagination, DjangoInputObje
 from django_koldar_utils.django_toolbox import django_helpers
 from rest_framework import serializers
 
+from django_koldar_utils.graphql_toolsbox.GraphQLHelper import GraphQLHelper
+from django_koldar_utils.graphql_toolsbox.GrapheneRegister import GrapheneRegister
 from django_koldar_utils.graphql_toolsbox.graphql_types import TGrapheneReturnType, TGrapheneQuery, TGrapheneMutation, \
-    TGrapheneInputType, TGrapheneType
+    TGrapheneInputType, TGrapheneType, TDjangoModelType
+from django_koldar_utils.graphql_toolsbox.input_generators import AbstractGrapheneInputGenerator, \
+    PrimitiveInputGenerator, StandardInputGenerator
 from django_koldar_utils.graphql_toolsbox.scalars.ArrowDateScalar import ArrowDateScalar
 from django_koldar_utils.graphql_toolsbox.scalars.ArrowDateTimeScalar import ArrowDateTimeScalar
 from django_koldar_utils.graphql_toolsbox.scalars.ArrowDurationScalar import ArrowDurationScalar
 
 
-def convert_field_into_input(field_specifier: Union[str, graphene.Field, models.Field], graphene_field: TGrapheneReturnType = None, graphene_type: Union[TGrapheneQuery, TGrapheneMutation] = None) -> TGrapheneReturnType:
-    """
-    Convert a graphene_toolbox type (or a field from the django_toolbox model) into an input one.
 
-    :param graphene_field: if set, we will convert a graphene_toolbox type into an input type (e.g. Field(Float) into float)
-    :param graphene_type: if graphene_field is None, we convert the association graphene_toolbox field belonging to the django_toolbox model model_field
-        (e.g., BigInteger into ID)
-    :param field_specifier: if graphene_field is None, we need something tha tspecify what it the field in graphene_type
-        that we want to convert. May be:
-         - the field name in the graphene_toolbox type to convert;
-         - the graphene_toolbox field instance;
-         - the django_toolbox model field instance (we assume there is the same name);
-    """
-    if graphene_field is not None:
-        t = graphene_field
-    elif graphene_type is not None:
-        if isinstance(field_specifier, UnmountedType):
-            t = graphene_type._meta.fields[field_specifier.attname]
-        if isinstance(field_specifier, models.Field):
-            t = graphene_type._meta.fields[field_specifier.attname]
-        elif isinstance(field_specifier, str):
-            t = graphene_type._meta.fields[field_specifier]
-        else:
-            raise TypeError(f"invalid type {field_specifier}!")
-    else:
-        raise ValueError(f"either graphene_field or graphene_type needs to be set")
-
-    # if the type is a Field, fetch encapsuled type
-    if isinstance(t, graphene.Field):
-        # a field may have "of_type" or "_type" inside it  conaining the actual field to convert
-        if hasattr(t.type, "of_type"):
-            graphene_field_type = t.type.of_type
-        else:
-            # this represents a complex graphql_toolsbox object (e.g. AuthorGraphQL). We need to convert it into an input
-            raise NotImplementedError()
-    else:
-        graphene_field_type = t.type
-
-
-    # we need to fetch the corresponding field and strap away the possible "required" field. The rest can remain the same
-    if graphene_field_type._meta.name == "String":
-        v = graphene.String(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "Int":
-        v = graphene.Int(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "Boolean":
-        v = graphene.Boolean(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "ID":
-        v = graphene.ID(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "DateTime":
-        v = graphene.DateTime(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "Date":
-        v = graphene.Date(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "ArrowDateTimeScalar":
-        v = ArrowDateTimeScalar(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "ArrowDateScalar":
-        v = ArrowDateScalar(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "ArrowDurationScalar":
-        v = ArrowDurationScalar(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "Base64":
-        v = graphene.Base64(required=False, default_value=t.default_value, description=t.description, **t.args)
-    elif graphene_field_type._meta.name == "Float":
-        v = graphene.Float(required=False, default_value=t.default_value, description=t.description, **t.args)
-    else:
-        raise ValueError(f"cannot handle type {t} (name = {graphene_field_type._meta.name})!")
-
-    return v
 
 
 # ##########################################################
@@ -262,76 +204,13 @@ def create_graphql_list_type(cls) -> type:
     return graphql_type
 
 # ##########################################################
-# GRAPHENE INPUT
+# GRAPHENE REGISTER
 # ##########################################################
 
-
-def _create_graphql_input(graphene_type: TGrapheneType, class_name: str, fields: Iterable[any], generate_input_field: Callable[[str, any, TGrapheneType], TGrapheneType], description: str = None, get_field_name: Callable[[any], str] = None, get_associated_django_model: Callable[[TGrapheneReturnType], str] = None, should_be_excluded: Callable[[str, any], bool] = None) -> type:
-    """
-    Create an input class from a **django_toolbox model** specifying only primitive types.
-    All such types are optional (not required)
-
-    :param graphene_type: graphene_toolbox type that we will use to create the assoicated graphene_toolbox input type
-    :param class_name: name of the input class to create
-    :param fields: fields of the graphene_toolbox type (or maybe the associated django_toolbox type) that we will use to crfeate the input
-    :param generate_input_field: a callable that generates a graphene_toolbox input type associated with a particular field
-    :param description: descritpion of the input class. None to put a defualt one
-    :param get_field_name: callable used to fetch the field name from an element of the field iterable
-    :param get_associated_django_model: callable used to fetch the associated django_toolbox model from the graphene_toolbox type.
-        If returns none, we will no include the "model" field in the meta input class
-    :param should_be_excluded: a callable that check if the field should be excluded or not
-    :return: input class
-    """
-
-    # class PersonInput(graphene_toolbox.InputObjectType):
-    #     name = graphene_toolbox.String(required=True)
-    #     age = graphene_toolbox.Int(required=True)
-
-    def default_get_field_name(f) -> str:
-        return f.attname
-
-    def default_get_associated_django_model(t: TGrapheneReturnType) -> Optional[models.Model]:
-        return None
-
-    def default_should_be_excluded(name: str, f: any) -> bool:
-        return False
-
-    if description is None:
-        description = f"""The graphql_toolsbox input type associated to the type {class_name}. See {class_name} for further information"""
-    if get_field_name is None:
-        get_field_name = default_get_field_name
-    if get_associated_django_model is None:
-        get_associated_django_model = default_get_associated_django_model
-    if should_be_excluded is None:
-        should_be_excluded = default_should_be_excluded
-
-    primitive_fields = {}
-    for field in fields:
-        field_name = get_field_name(field)
-        if should_be_excluded(field_name, field):
-            continue
-
-        v = generate_input_field(field_name, field, graphene_type)
-        primitive_fields[field_name] = v
-
-    associated_django_type = get_associated_django_model(graphene_type)
-    properties = {}
-    properties["description"] = description
-    properties["__doc__"] = description
-    if associated_django_type is not None:
-        properties["model"] = associated_django_type
-    properties.update(primitive_fields)
-
-    input_graphql_type = type(
-        class_name,
-        (graphene.InputObjectType, ),
-        properties
-    )
-
-    return input_graphql_type
-
-
-
+DEFAULT_REGISTER: GrapheneRegister = GrapheneRegister()
+DEFAULT_REGISTER.register_base_types("default")
+DEFAULT_GRAPHENE_INPUT_GENERATOR: AbstractGrapheneInputGenerator = StandardInputGenerator()
+DEFAULT_GRAPHENE_PRIMITIVE_INPUT_GENERATOR: AbstractGrapheneInputGenerator = PrimitiveInputGenerator()
 
 
 def create_graphql_primitive_input(django_type: type, graphene_type: type, exclude_fields: List[str] = None) -> type:
@@ -343,32 +222,46 @@ def create_graphql_primitive_input(django_type: type, graphene_type: type, exclu
     if exclude_fields is None:
         exclude_fields = []
 
-    def generate_input_field(field_name: str, f: any, graphene_type: TGrapheneType) -> any:
-        v = convert_field_into_input(
-            graphene_type=graphene_type,
-            field_specifier=f,
-        )
-        return v
-
-    def should_be_exluded(field_name: str, f: any) -> bool:
-        nonlocal exclude_fields
-        return field_name in exclude_fields
+    # def generate_input_field(field_name: str, f: any, graphene_type: TGrapheneType) -> any:
+    #     v = convert_field_into_input(
+    #         graphene_type=graphene_type,
+    #         field_specifier=f,
+    #     )
+    #     return v
+    #
+    # def should_be_exluded(field_name: str, f: any) -> bool:
+    #     nonlocal exclude_fields
+    #     return field_name in exclude_fields
 
     class_name = django_type.__name__
-    result = _create_graphql_input(
-        class_name=f"{stringcase.pascalcase(class_name)}PrimitiveGraphQLInput",
-        graphene_type=graphene_type,
-        fields=django_helpers.get_primitive_fields(django_type),
-        description=f"""The graphql_toolsbox input tyep associated to the type {class_name}. See {class_name} for further information""",
-        generate_input_field=generate_input_field,
-        should_be_excluded=should_be_exluded,
-    )
+    field_names = list(map(lambda x: x.name, filter(lambda x: x.name in exclude_fields, django_helpers.get_primitive_fields(django_type))))
 
+    result = DEFAULT_GRAPHENE_PRIMITIVE_INPUT_GENERATOR.create_graphql_input_type(
+        graphene_type=graphene_type,
+        class_name=f"{stringcase.pascalcase(class_name)}PrimitiveGraphQLInput",
+        field_names=field_names,
+        description=f"""The graphql_toolsbox input tyep associated to the type {class_name}. See {class_name} for further information""",
+        register=DEFAULT_REGISTER,
+    )
     return result
+
+    # class_name = django_type.__name__
+    # result = _create_graphql_input(
+    #     class_name=f"{stringcase.pascalcase(class_name)}PrimitiveGraphQLInput",
+    #     graphene_type=graphene_type,
+    #     fields=django_helpers.get_primitive_fields(django_type),
+    #     description=f"""The graphql_toolsbox input tyep associated to the type {class_name}. See {class_name} for further information""",
+    #     generate_input_field=generate_input_field,
+    #     should_be_excluded=should_be_exluded,
+    # )
+    #
+    # return result
 
 
 def create_graphql_input(cls) -> type:
     """
+    Create a graphene input by calling django extra package.
+    Note that this will not include the id. You may need it or not.
     See dujango extras
     """
 

@@ -10,7 +10,7 @@ import graphene_django
 from django_koldar_utils.graphql_toolsbox import graphql_decorators
 from django_koldar_utils.graphql_toolsbox.graphql_types import TGrapheneInputType, TGrapheneType, TDjangoModelType, \
     TGrapheneQuery, TGrapheneArgument, TGrapheneWholeQueryReturnType
-from django_koldar_utils.models.AbstractEnum import AbstractEnum
+from koldar_utils.models.AbstractEnum import AbstractEnum
 
 from django_graphene_crud_generator.IGraphQLEndpointComponent import IGraphQLEndpointComponent
 from django_graphene_crud_generator.generator.contexts import GraphQLBuildtimeContext, GraphQLRuntimeContext
@@ -43,7 +43,7 @@ class ComponentPriorityEnum(AbstractEnum):
         return int(self.value)
 
 
-class IGraphQLEndpointGenerator(IGraphQLEndpointComponent, abc.ABC):
+class AbstractGraphQLEndpointGenerator(IGraphQLEndpointComponent, abc.ABC):
     """
     Generate a mutation/query endpoint
     """
@@ -75,6 +75,46 @@ class IGraphQLEndpointGenerator(IGraphQLEndpointComponent, abc.ABC):
 
     def clear_components(self):
         self.__components.clear()
+
+    def call_component_method_with_result_store(self, name: str, build_context: GraphQLBuildtimeContext, args: List[str] = None, kwargs: Dict[str, any] = None, accumulate: Callable[[List[any], Dict[str, any], any], Tuple[List[any], Dict[str, any]]] = None, default_return_value: any = None):
+        """
+        Scans all the components of this class and iteratively call the method with the specified name.
+        If accumulate is defined, you can use the return value fo the method called to alter args and kwargs of the next method call.
+        if a component does not have the specified method, we will skip ahead.
+
+        This method is different than call_component_method becuase each time a result from a component is fetched, we
+        store its value in build_context "data" section under the key "f{name}_result" where name is the method name.
+        The key is then removed at the end of this method
+
+        :param name: name of the method to call
+        :param accumulate: function that is used to integrate the return value of a component method jkust called to
+            alter args and kwargs of the next component call. The last accumulate call we perform will not change
+            anything
+        :param default_return_value: value to return if no component has the specified method. Defaults to None
+        :param args: initial arg of the first component method invocation
+        :param kwargs: initial kwarg of the first component method invocation
+        :return: return value of the component call
+                """
+
+        data_key = f"{name}_result"
+
+        def wrapper_accumulate(_args, _kwargs, _result):
+            nonlocal build_context
+            if accumulate is not None:
+                _args, _kwargs = accumulate(_args, _kwargs, _result)
+            build_context.set_data(data_key, _result)
+            return _args, _kwargs
+
+        try:
+            return self.call_component_method(
+                name=name,
+                args=args,
+                kwargs=kwargs,
+                accumulate=wrapper_accumulate,
+                default_return_value=default_return_value
+            )
+        finally:
+            build_context.delete_data(data_key)
 
     def call_component_method(self, name: str, args: List[any] = None, kwargs: Dict[str, any] = None, accumulate: Callable[[List[any], Dict[str, any], any], Tuple[List[any], Dict[str, any]]] = None, default_return_value: any = None) -> any:
         """

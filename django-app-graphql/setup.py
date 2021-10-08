@@ -1,5 +1,5 @@
 from django_app_graphql import version
-from django_koldar_utils.setuptools import library_setup
+from koldar_utils.setuptools_toolbox import library_setup
 
 
 s = library_setup.LibraryScriptSetup(

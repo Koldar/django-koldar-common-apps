@@ -43,6 +43,15 @@ class GraphQLBuildtimeContext(object):
         """
         self.__internal_data[name] = value
 
+    def delete_data(self, name: str):
+        """
+        Delete a data from the build context. if the key is not present we do nothing
+
+        :param name: name fo the data to delete
+        """
+        if name in self.__internal_data:
+            del self.__internal_data[name]
+
     def has_data(self, name: str) -> bool:
         """
         Check if we have set the specific name

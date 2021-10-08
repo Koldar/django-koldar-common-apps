@@ -74,21 +74,3 @@ class IGraphQLEndpointComponent(abc.ABC):
              - GraphQLRuntimeContext, *args, **kwargs -> any
         """
         return None
-
-    # def _generate_additional_class_names(self, class_name: str, build_context: GraphQLBuildtimeContext) -> str:
-    #     """
-    #     In some really specific scenario you want to generate some temporary graphene types that can be use as
-    #     transformations. Since such temp types may have names and return values names and since we may want to change
-    #     their name as well, we need a method to
-    #     as
-    #     :param class_name:
-    #     :param build_context:
-    #     :return:
-    #     """
-    #
-    #     crud_build_context = self.crud_build_context(build_context)
-    #     return f"{stringcase.camelcase(self.subgraph_name(crud_build_context))}{class_name}"
-    #
-    # def _generate_additional_class_return_type_names(self, original_class_name: str, return_value_name: str, build_context: GraphQLBuildtimeContext) -> str:
-    #     crud_build_context = self.crud_build_context(build_context)
-    #     return f"{stringcase.camelcase(self.subgraph_name(crud_build_context))}{return_value_name}"

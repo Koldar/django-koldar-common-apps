@@ -1,7 +1,7 @@
 from typing import List, Dict
 
 
-from django_koldar_utils.setuptools_toolbox.commons import  AbstractScriptSetup
+from koldar_utils.setuptools_toolbox.commons import  AbstractScriptSetup
 
 
 class ConsoleScriptSetup(AbstractScriptSetup):

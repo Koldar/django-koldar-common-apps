@@ -2,7 +2,7 @@ import ariadne
 from ariadne import gql, QueryType, MutationType
 from ariadne.contrib.federation import make_federated_schema
 from django.apps import apps
-from django_koldar_utils.functions import file_helpers
+from koldar_utils.functions import file_helpers
 from graphql.type.schema import GraphQLSchema
 
 from django_app_graphql.ariadne.decorators import AriadneSchemaEntityYielder

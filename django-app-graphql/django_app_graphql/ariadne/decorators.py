@@ -1,7 +1,7 @@
 from typing import Dict, Set, Iterable
 
 from ariadne import QueryType, MutationType, ObjectType, ScalarType
-from django_koldar_utils.functions import decorators
+from koldar_utils.functions import decorators
 
 
 class AriadneSchemaEntityYielder(object):

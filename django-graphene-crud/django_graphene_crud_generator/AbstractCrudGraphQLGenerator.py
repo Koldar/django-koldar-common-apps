@@ -18,14 +18,14 @@ from django_koldar_utils.graphql_toolsbox.graphql_types import TGrapheneArgument
 from django_graphene_crud_generator.crud_generator.shared_components import AddCRUDRuntimeContextComponent
 from django_graphene_crud_generator.generator.AbstractGraphQLMutationGenerator import AbstractGraphQLMutationGenerator
 from django_graphene_crud_generator.generator.AbstractGraphQLQueryGenerator import AbstractGraphQLQueryGenerator
-from django_graphene_crud_generator.generator.IGraphQLEndpointGenerator import ComponentPriorityEnum
+from django_graphene_crud_generator.generator.AbstractGraphQLEndpointGenerator import ComponentPriorityEnum
 
 
-class ICrudGraphQLGenerator(abc.ABC):
+class AbstractCrudGraphQLGenerator(abc.ABC):
     """
     Interface for creating graphql CRUD endpoints of a particular entity.
     These crud operations are production ready: this means that they are all authenticated by default.
-    We rely on IGraphQLEndpointGenerator in order to generateg single operations
+    We rely on AbstractGraphQLEndpointGenerator in order to generateg single operations
     """
 
     def _get_common_components(self, build_context: CRUDBuildContext) -> List[Tuple[int, IGraphQLEndpointComponent]]:
@@ -266,28 +266,25 @@ class ICrudGraphQLGenerator(abc.ABC):
                 crud_build_context=crud_build_context
             )
 
-        # if generate_update:
-        #     update = cls.generate_mutation_update_primitive_data(
-        #         django_type=django_type,
-        #         django_graphql_type=django_graphql_type,
-        #         django_input_type=django_input_type,
-        #         permissions_required=permissions_required_update,
-        #         mutation_class_name=class_names.get_update_name(django_type),
-        #         output_name=class_names.get_update_return_value_name(django_type),
-        #         token_name=token_name,
-        #     )
-        #
-        # if generate_delete:
-        #     delete = cls.generate_mutation_mark_inactive(
-        #         django_type=django_type,
-        #         django_graphql_type=django_graphql_type,
-        #         django_input_type=django_input_type,
-        #         active_flag_name=active_field_name,
-        #         permissions_required=permissions_required_delete,
-        #         mutation_class_name=class_names.get_delete_name(django_type),
-        #         output_name=class_names.get_delete_return_value_name(django_type),
-        #         token_name=token_name,
-        #     )
+        if generate_update:
+            update = self._generate_mutation_update(
+                crud_build_context=crud_build_context
+            )
+
+        if generate_delete:
+            delete = self._generate_mutation_delete(
+                crud_build_context=crud_build_context
+            )
+            #     django_type=django_type,
+            #     django_graphql_type=django_graphql_type,
+            #     django_input_type=django_input_type,
+            #     active_flag_name=active_field_name,
+            #     permissions_required=permissions_required_delete,
+            #     mutation_class_name=class_names.get_delete_name(django_type),
+            #     output_name=class_names.get_delete_return_value_name(django_type),
+            #     token_name=token_name,
+            # )
+
         return create, read_all, update, delete, read_single
 
     # ######################################
@@ -315,6 +312,62 @@ class ICrudGraphQLGenerator(abc.ABC):
     #     :return: formal return value of a grpahql query/mutation
     #     """
     #     pass
+
+    def _generate_mutation_delete(self, crud_build_context: CRUDBuildContext) -> List[TGrapheneMutation]:
+        """
+        Create a mutation that adds a new element in the database.
+        We will generate a mutation that accepts a single input parameter. It checks if the input is not already present in the database and if not, it adds it.
+        The returns the data added in the database.
+        This method can already integrate graphene_jwt to authenticate and authorize users
+
+        :param crud_build_context: object containing data availalbe while genrating the graphql mutations and queries
+        :return: class rerpesenting the mutation
+        """
+
+        result = []
+
+        crud_build_context.build_phase = CrudBuildPhaseEnum.DELETE
+        kwargs = crud_build_context.params
+        kwargs["crud_build_context"] = crud_build_context
+
+        for name, generator in self._get_delete_graphql_generators(crud_build_context).items():
+            for p, c in self._get_common_components(crud_build_context):
+                generator.register_component(c, priority=p)
+            for p, c in self._get_delete_components(crud_build_context):
+                generator.register_component(c, priority=p)
+            result.append(generator.generate(
+                permissions=self._get_permissions_to_delete(name, crud_build_context), **kwargs
+            ))
+
+        return result
+
+    def _generate_mutation_update(self, crud_build_context: CRUDBuildContext) -> List[TGrapheneMutation]:
+        """
+        Create a mutation that adds a new element in the database.
+        We will generate a mutation that accepts a single input parameter. It checks if the input is not already present in the database and if not, it adds it.
+        The returns the data added in the database.
+        This method can already integrate graphene_jwt to authenticate and authorize users
+
+        :param crud_build_context: object containing data availalbe while genrating the graphql mutations and queries
+        :return: class rerpesenting the mutation
+        """
+
+        result = []
+
+        crud_build_context.build_phase = CrudBuildPhaseEnum.UPDATE
+        kwargs = crud_build_context.params
+        kwargs["crud_build_context"] = crud_build_context
+
+        for name, generator in self._get_update_graphql_generators(crud_build_context).items():
+            for p, c in self._get_common_components(crud_build_context):
+                generator.register_component(c, priority=p)
+            for p, c in self._get_update_components(crud_build_context):
+                generator.register_component(c, priority=p)
+            result.append(generator.generate(
+                permissions=self._get_permissions_to_update(name, crud_build_context), **kwargs
+            ))
+
+        return result
 
     # ######################################
     # READ SINGLE

@@ -4,7 +4,7 @@ import os
 
 import graphene
 import stringcase
-from django_koldar_utils.functions import modules
+from koldar_utils.functions import modules
 
 from django_koldar_utils.graphql_toolsbox.graphql_decorators import graphql_subquery, graphql_submutation
 from django_app_graphql.conf import DjangoAppGraphQLAppConf

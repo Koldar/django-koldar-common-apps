@@ -6,11 +6,11 @@ import graphene
 from django_koldar_utils.graphql_toolsbox import graphql_decorators
 from django_koldar_utils.graphql_toolsbox.GraphQLHelper import GraphQLHelper
 
-from django_graphene_crud_generator.generator.IGraphQLEndpointGenerator import IGraphQLEndpointGenerator
+from django_graphene_crud_generator.generator.AbstractGraphQLEndpointGenerator import AbstractGraphQLEndpointGenerator
 from django_graphene_crud_generator.generator.contexts import GraphQLBuildtimeContext
 
 
-class AbstractGraphQLQueryGenerator(IGraphQLEndpointGenerator, abc.ABC):
+class AbstractGraphQLQueryGenerator(AbstractGraphQLEndpointGenerator, abc.ABC):
     """
     Generate a query via graphene and automatically registers it with graphql_subquery decorator
     """

@@ -1,4 +1,4 @@
-from django_koldar_utils.setuptools_toolbox.library_setup import LibraryScriptSetup
+from koldar_utils.setuptools_toolbox.library_setup import LibraryScriptSetup
 
 s = LibraryScriptSetup(
     author_mail="massimobono1@gmail.com",

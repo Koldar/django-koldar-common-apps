@@ -2,17 +2,17 @@ import abc
 import logging
 
 import graphene
-from django_koldar_utils.functions import logic_helpers
+from koldar_utils.functions import logic_helpers
 from django_koldar_utils.graphql_toolsbox import graphql_decorators
 
-from django_graphene_crud_generator.generator.IGraphQLEndpointGenerator import IGraphQLEndpointGenerator
+from django_graphene_crud_generator.generator.AbstractGraphQLEndpointGenerator import AbstractGraphQLEndpointGenerator
 from django_graphene_crud_generator.generator.contexts import GraphQLBuildtimeContext, GraphQLRuntimeContext
 
 
 LOG = logging.getLogger(__name__)
 
 
-class AbstractGraphQLMutationGenerator(IGraphQLEndpointGenerator, abc.ABC):
+class AbstractGraphQLMutationGenerator(AbstractGraphQLEndpointGenerator, abc.ABC):
     """
     Generate a query via graphene and automatically registers it with graphql_subquery decorator
     """

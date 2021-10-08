@@ -1,14 +1,11 @@
-from typing import List, Dict
+from typing import List
+
+from koldar_utils.setuptools_toolbox.commons import AbstractScriptSetup
 
 
-from django_koldar_utils.setuptools_toolbox.commons import  AbstractScriptSetup
-
-
-class DjangoProjectScriptSetup(AbstractScriptSetup):
+class LibraryScriptSetup(AbstractScriptSetup):
     """
-    A package that provides an ENTIRE django_toolbox project.
-
-    When installing, you can just call "console_script_name" program you have chosen
+    A package that is simply a library tha tcan be used in another projects
     """
 
     def __init__(self, author: str, author_mail: str, description: str, keywords: List[str], home_page: str,
@@ -32,10 +29,3 @@ class DjangoProjectScriptSetup(AbstractScriptSetup):
             doc_dependencies=doc_dependencies,
         )
 
-    def get_scripts(self) -> List[str]:
-        if self.scripts is None:
-            result = []
-        else:
-            result = list(self.scripts)
-        result.append('manage.py')
-        return result

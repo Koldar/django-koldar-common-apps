@@ -22,7 +22,7 @@ from django_graphene_crud_generator.generator.AbstractCreateGraphQLMutationGener
 from django_graphene_crud_generator.generator.AbstractGraphQLMutationGenerator import AbstractGraphQLMutationGenerator
 from django_graphene_crud_generator.generator.AbstractReadGraphQLQueryGenerator import \
     AbstractReadGraphQLQueryGenerator, AbstractReadAllReturnAllQuery
-from django_graphene_crud_generator.generator.IGraphQLEndpointGenerator import IGraphQLEndpointGenerator
+from django_graphene_crud_generator.generator.AbstractGraphQLEndpointGenerator import AbstractGraphQLEndpointGenerator
 from django_graphene_crud_generator.generator.contexts import GraphQLRuntimeContext, GraphQLBuildtimeContext
 from django_graphene_crud_generator.types import GrapheneGeneratorBodyFunction
 
@@ -130,33 +130,6 @@ class ReadQueryReturnElementListWithCount(AbstractGraphQLCrudComponent):
         return decorator
 
 
-class ReadQueryByInputtingMatcher(AbstractGraphQLCrudComponent):
-    """
-    We configure the graphql endpoint to require a nullable input representing the pattern a value compliant with all its non
-    None value needs to have in order to be returned. If the input is None, we fetch all the elements
-    """
-
-    def _get_query_input_parameter_name(self, build_context: CRUDBuildContext) -> str:
-        """
-        Name of the parameter in create mutation that defines the element to add
-        """
-        return f"{stringcase.camelcase(build_context.django_type.__name__)}Match"
-
-    def _generate_action_arguments(self, build_context: GraphQLBuildtimeContext) -> Tuple[str, Dict[str, TGrapheneArgument]]:
-        crud_build_context = self.crud_build_context(build_context)
-
-        result = dict()
-        input_name = self._get_query_input_parameter_name(crud_build_context)
-        result[input_name] = GraphQLHelper.argument_nullable_input(
-            input_type=crud_build_context.graphene_input_type,
-            description="""a template that is used to retrieve elements from the system. We retrieve only the elements
-                        that have the same non-null elements w.r.t this parameter. If the parameter is None we will
-                        return all the elements in the system
-            """)
-
-        return "update", result
-
-
 class AbstractCrudReadQuery(AddCRUDContextComponentMixIn, AbstractReadAllReturnAllQuery):
     """
     Represents the default create mutation generator that we will use in the implementation of ICrudGraphQLEndpointGenerator.
@@ -168,29 +141,8 @@ class AbstractCrudReadQuery(AddCRUDContextComponentMixIn, AbstractReadAllReturnA
     it or derive the class. It is indifferent
     """
 
-    def _convert_input(self, input: graphene.InputObjectType) -> Dict[str, any]:
-        """
-        Convert an input passed from graphene into a dictionary. If the inoptu is null (it might happen) return an
-        empty dictionary
-        :param input: input to convert
-        :return: converted dictionary
-        """
-        if input is None:
-            return dict()
-        if isinstance(input, dict):
-            return input
-        d = dict()
-        for k, v in dict(input).items():
-            if v is None:
-                continue
-            if GraphQLHelper.is_representing_input_argument(v):
-                d[k] = self._convert_input(v)
-            else:
-                d[k] = v
-        return d
-
     def _get_query_output_name(self, build_context: GraphQLBuildtimeContext) -> str:
-        return self.call_component_method("_get_query_output_name", kwargs=dict(build_context=build_context))
+        return self.call_component_method_with_result_store("_get_query_output_name", build_context, kwargs=dict(build_context=build_context))
 
     def _get_return_value_temp_type_name(self, build_context: GraphQLBuildtimeContext) -> str:
         return self.call_component_method("_get_return_value_temp_type_name", kwargs=dict(build_context=build_context))

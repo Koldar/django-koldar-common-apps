@@ -8,8 +8,8 @@ import environ
 from django.core.management.commands.runserver import Command as runserver
 from django_koldar_utils.django_toolbox.Orm import Orm
 from django_koldar_utils.django_toolbox.settings import settings_helper
-from django_koldar_utils.functions import modules
-from django_koldar_utils.models.AttrDict import AttrDict
+from koldar_utils.functions import modules
+from koldar_utils.models.AttrDict import AttrDict
 
 
 LOG = logging.getLogger(__name__)

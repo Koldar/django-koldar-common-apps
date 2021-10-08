@@ -6,7 +6,7 @@ from django.contrib.auth.hashers import make_password
 from django.db import models
 
 from django_koldar_utils.django_toolbox.Orm import Orm
-from django_koldar_utils.functions import secrets_helper
+from koldar_utils.functions import secrets_helper
 
 
 class ForgetTokenMixin(models.Model):

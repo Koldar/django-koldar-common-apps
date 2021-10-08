@@ -1,6 +1,6 @@
 from typing import Callable, Union
 
-from django_koldar_utils.functions import python_helpers
+from koldar_utils.functions import python_helpers
 
 
 def implies(x: any, y: Union[Callable[[], bool], any]) -> bool:

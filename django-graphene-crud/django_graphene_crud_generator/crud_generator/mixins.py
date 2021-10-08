@@ -1,6 +1,8 @@
-from typing import List
+from typing import List, Dict
 
+import graphene
 import stringcase
+from django_koldar_utils.graphql_toolsbox.GraphQLHelper import GraphQLHelper
 from django_koldar_utils.graphql_toolsbox.graphql_types import TDjangoModelType
 
 from django_graphene_crud_generator.crud_generator.contexts import CRUDBuildContext, CRUDRuntimeContext
@@ -22,10 +24,36 @@ class AddCRUDContextComponentMixIn:
     def django_type(self, build_context: GraphQLBuildtimeContext) -> TDjangoModelType:
         return self.crud_build_context(build_context).django_type
 
+    def _convert_input(self, input: graphene.InputObjectType) -> Dict[str, any]:
+        """
+        Convert an input passed from graphene into a dictionary. If the inoptu is null (it might happen) return an
+        empty dictionary
+        :param input: input to convert
+        :return: converted dictionary
+        """
+        if input is None:
+            return dict()
+        if isinstance(input, dict):
+            # before returning we will need to filter out None value
+            d = dict()
+            for k, v in input.items():
+                if v is not None:
+                    d[k] = v
+            return d
+        d = dict()
+        for k, v in dict(input).items():
+            if v is None:
+                continue
+            if GraphQLHelper.is_representing_input_argument(v):
+                d[k] = self._convert_input(v)
+            else:
+                d[k] = v
+        return d
+
 
 class CanXPermissionsGraphQLCrudGeneratorMixIn:
     """
-    A mix in to support ICrudGraphQLGenerator implementations.
+    A mix in to support AbstractCrudGraphQLGenerator implementations.
 
     This mixin configure the generator in such a way that it uses "can_X_Y" permissions,
     where X is either "create, view, update, delete" while Y is the snake case of a django model (e.g. foobar)

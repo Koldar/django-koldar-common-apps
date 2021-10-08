@@ -1,6 +1,6 @@
 import unittest
 
-from django_koldar_utils.functions import iterator_helpers
+from koldar_utils.functions import iterator_helpers
 
 
 class TestIteratoHelpers(unittest.TestCase):

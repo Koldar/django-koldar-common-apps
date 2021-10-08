@@ -1,9 +1,69 @@
 import sys
-from typing import Iterable
+from typing import Iterable, Optional, Union, List
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.apps import apps
+
+DEFAULT_NAMES_TO_CHECK = ["is_active", "active", "deleted"]
+
+def get_active_flag_name_or_none(model: Union[type, models.Model], names_to_check: List[str] = None) -> Optional[str]:
+    """
+    Trying to fetch the flag representing whether or not the model is active or not
+
+    :param model: either the type of the django model or an instance of it
+    :param names_to_check: flag names to check for the specified model
+    :return: the name of the flag representing if the model is active or not. If we cannot find it, we return None
+    """
+    if names_to_check is None:
+        names_to_check = DEFAULT_NAMES_TO_CHECK
+    if isinstance(model, models.Model):
+        model = type(model)
+
+    for x in names_to_check:
+        try:
+            val = getattr(model, x)
+            return x
+        except AttributeError:
+            continue
+    else:
+        return None
+
+
+def is_active_flag(instance: models.Model, default_value: bool = True, names_to_check: List[str] = None) -> bool:
+    """
+    Check if the active flag is true or false
+
+    :param instance: the isntan ce whose active flag we need to check
+    :param names_to_check: flag names to check for the specified model
+    :param default_value: the value to return if the instance does not have an active flag
+    :return: active flag value
+    """
+
+    if names_to_check is None:
+        names_to_check = DEFAULT_NAMES_TO_CHECK
+    flag_name = get_active_flag_name_or_none(instance, names_to_check)
+    if flag_name is None:
+        return default_value
+    else:
+        return bool(getattr(instance, flag_name))
+
+
+def set_active_flag_to(instance: models.Model, enable: bool, names_to_check: List[str] = None):
+    """
+    Set the active flag to a specific value.
+    if the instance does not have an active flag, we do nothing
+
+    :param instance: instance of the model whose active flag we need to check
+    :param names_to_check: flag names to check for the specified model
+    :return: true if the flag was present, false otherwise
+    """
+    if names_to_check is None:
+        names_to_check = DEFAULT_NAMES_TO_CHECK
+    flag_name = get_active_flag_name_or_none(instance, names_to_check=names_to_check)
+    if flag_name is not None:
+        setattr(instance, flag_name, enable)
+    return flag_name is not None
 
 
 def get_all_app_names() -> Iterable[str]:

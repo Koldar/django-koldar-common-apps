@@ -1,11 +1,11 @@
 import enum
 
-from django_koldar_utils.models.AbstractEnum import AbstractEnum
+from koldar_utils.models.AbstractEnum import AbstractEnum
 
 
 class CrudBuildPhaseEnum(AbstractEnum):
     """
-    The generators we are currently building in a ICrudGraphQLGenerator
+    The generators we are currently building in a AbstractCrudGraphQLGenerator
     """
     CREATE = enum.auto()
     READ_SINGLE = enum.auto()

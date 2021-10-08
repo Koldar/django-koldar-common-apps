@@ -1,0 +1,8 @@
+datasize==1.0.0
+docutils==0.17.1
+jmespath==0.10.0
+m2r==0.2.1
+mistune==0.8.4
+Pillow==8.3.1
+semantic-version==2.8.5
+stringcase==1.2.0

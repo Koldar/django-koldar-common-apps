@@ -14,7 +14,8 @@ from django.core.files.images import ImageFile
 
 from django_koldar_utils.django_toolbox.AbstractDjangoField import AbstractDjangoField
 from django_koldar_utils.django_toolbox.validators import validators
-from django_koldar_utils.functions import image_helpers, math_helpers, secrets_helper
+from koldar_utils.functions import image_helpers, math_helpers, secrets_helper
+
 
 class PhotoFieldFile(ImageFieldFile):
 

@@ -7,8 +7,8 @@ import os
 import sys
 import logging
 
-from django_koldar_utils.functions import modules
-from django_koldar_utils.models.AttrDict import AttrDict
+from koldar_utils.functions import modules
+from koldar_utils.models.AttrDict import AttrDict
 
 LOG = logging.getLogger(__name__)
 

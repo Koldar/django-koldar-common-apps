@@ -20,6 +20,35 @@ from django_koldar_utils.graphql_toolsbox.graphql_types import TGrapheneArgument
 from django_graphene_crud_generator.crud_generator.contexts import CRUDBuildContext
 
 
+class ReadQueryByInputtingMatcher(AbstractGraphQLCrudComponent):
+    """
+    We configure the graphql endpoint to require a nullable input representing the pattern a value compliant with all its non
+    None value needs to have in order to be returned. If the input is None, we fetch all the elements.
+
+    What you do with that pattern is no concern fo thix mixin
+    """
+
+    def _get_query_input_parameter_name(self, build_context: CRUDBuildContext) -> str:
+        """
+        Name of the parameter in create mutation that defines the element to add
+        """
+        return f"{stringcase.camelcase(build_context.django_type.__name__)}Match"
+
+    def _generate_action_arguments(self, build_context: GraphQLBuildtimeContext) -> Tuple[str, Dict[str, TGrapheneArgument]]:
+        crud_build_context = self.crud_build_context(build_context)
+
+        result = dict()
+        input_name = self._get_query_input_parameter_name(crud_build_context)
+        result[input_name] = GraphQLHelper.argument_nullable_input(
+            input_type=crud_build_context.graphene_input_type,
+            description="""a template that is used to retrieve elements from the system. We retrieve only the elements
+                        that have the same non-null elements w.r.t this parameter. If the parameter is None we will
+                        return all the elements in the system
+            """)
+
+        return "update", result
+
+
 class AddCRUDRuntimeContextComponent(AbstractGraphQLCrudComponent):
     """
     Add to the runtime_context
@@ -70,16 +99,23 @@ class FederatedNamesCrudComponent(AbstractGraphQLCrudComponent):
             raise ValueError(f"invalid build phase {crud_build_context.build_phase}")
 
         federation_action_class_name_mapper[new_key] = build_context.action_class_name
+        build_context.action_class_name = new_key
         build_context.set_data("federation_action_class_name_mapper", federation_action_class_name_mapper)
         return new_key
 
-    def _generate_additional_class_names(self, class_name: str, build_context: GraphQLBuildtimeContext) -> str:
+    def _get_query_output_name(self, build_context: GraphQLBuildtimeContext) -> str:
         crud_build_context = self.crud_build_context(build_context)
-        return f"{stringcase.camelcase(self.subgraph_name(crud_build_context))}{class_name}"
+        previous_result = build_context.get_data("_get_query_output_name_result")
+        return f"{stringcase.camelcase(self.subgraph_name(crud_build_context))}{stringcase.pascalcase(previous_result)}"
 
-    def _generate_additional_class_return_type_names(self, original_class_name: str, return_value_name: str, build_context: GraphQLBuildtimeContext) -> str:
-        crud_build_context = self.crud_build_context(build_context)
-        return f"{stringcase.camelcase(self.subgraph_name(crud_build_context))}{return_value_name}"
+    # TODO remove
+    # def _generate_additional_class_names(self, class_name: str, build_context: GraphQLBuildtimeContext) -> str:
+    #     crud_build_context = self.crud_build_context(build_context)
+    #     return f"{stringcase.camelcase(self.subgraph_name(crud_build_context))}{class_name}"
+    #
+    # def _generate_additional_class_return_type_names(self, original_class_name: str, return_value_name: str, build_context: GraphQLBuildtimeContext) -> str:
+    #     crud_build_context = self.crud_build_context(build_context)
+    #     return f"{stringcase.camelcase(self.subgraph_name(crud_build_context))}{return_value_name}"
 
     def _generate_action_return_type(self, build_context: GraphQLBuildtimeContext) -> Tuple[str, TGrapheneWholeQueryReturnType]:
         crud_build_context = self.crud_build_context(build_context)
